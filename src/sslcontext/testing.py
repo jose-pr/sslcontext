@@ -13,10 +13,11 @@ import threading
 from typing import List, Optional, Tuple
 
 from ._identity import Identity, Padding
-from ._load import BytesOrText, _as_bytes, _password
+from ._load import BytesOrText, _as_bytes, read_key_with
+from ._pin import PasswordSource
 from ._openssl import openssl
 from ._openssl._errors import drain_errors
-from ._openssl._objects import certificate_der, read_certificates, read_private_key
+from ._openssl._objects import certificate_der, read_certificates
 from .exceptions import SigningError
 
 __all__ = ["SoftwareSigner", "software_identity"]
@@ -37,11 +38,9 @@ class SoftwareSigner:
     a test can see what the TLS stack asked for.
     """
 
-    def __init__(self, key: BytesOrText, password: str | bytes | None = None) -> None:
+    def __init__(self, key: BytesOrText, password: PasswordSource = None) -> None:
         self._lib = openssl()
-        self._key = read_private_key(
-            self._lib, _as_bytes(key, "key"), _password(password)
-        )
+        self._key = read_key_with(self._lib, _as_bytes(key, "key"), password)
         self._lock = threading.Lock()
         self.calls: List[Tuple[str, Optional[Padding], Optional[int]]] = []
 
@@ -141,7 +140,7 @@ class SoftwareSigner:
 def software_identity(
     certificate: BytesOrText,
     key: BytesOrText,
-    password: str | bytes | None = None,
+    password: PasswordSource = None,
 ) -> Identity:
     """An :class:`Identity` for a PEM certificate (+ chain) and an in-memory key."""
     lib = openssl()

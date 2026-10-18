@@ -122,6 +122,19 @@ def test_identity_is_found_by_thumbprint_and_authenticates(store_certificate):
         assert server.handshake(context) == (store_certificate.subject, "TLSv1.3")
 
 
+def test_keys_usable_silently_never_consult_the_pin_source(store_certificate):
+    def never(request):
+        raise AssertionError(f"asked for a PIN: {request}")
+
+    identity = CNGBackend(pin=never).find_identity(
+        thumbprint=store_certificate.thumbprint
+    )
+    context = client_context()
+    sslcontext.load_identity(context, identity)
+    with TLSServer(trust=store_certificate.der) as server:
+        assert server.handshake(context).client_cn == store_certificate.subject
+
+
 def test_identity_is_found_by_subject_and_label(store_certificate):
     backend = CNGBackend()
     by_subject = backend.find_identity(subject=store_certificate.subject.upper())

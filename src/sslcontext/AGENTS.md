@@ -50,20 +50,21 @@ def load_pem(
     context: ssl.SSLContext,
     certificate: bytes | str,
     key: bytes | str | None = None,
-    password: str | bytes | None = None,
+    password: PasswordSource = None,
 ) -> None
 ```
 
 Makes `certificate` (+ chain) and `key` the context's identity without
 touching the disk. `certificate` is PEM text (leaf first, then chain) or one
 DER certificate. `key` is a PEM or DER private key; omitted, it is read from
-`certificate` (a combined PEM). `password` decrypts an encrypted key.
+`certificate` (a combined PEM). `password` decrypts an encrypted key; see
+[PINs and passwords](#pins-and-passwords-sslcontext).
 
 ```python
 def load_pkcs12(
     context: ssl.SSLContext,
     data: bytes,
-    password: str | bytes | None = None,
+    password: PasswordSource = None,
 ) -> None
 ```
 
@@ -144,6 +145,58 @@ The signer is kept alive until `context` is garbage-collected. Raises
 (interpreter's OpenSSL cannot host the signer), `TypeError`. Works on
 OpenSSL 1.1.1 and 3.x.
 
+## PINs and passwords (`sslcontext`)
+
+Nothing waits on a user unless the caller chose it. Without a PIN, an
+operation that needs one fails at once with `KeystoreError`; a keystore's own
+prompt (Windows' PIN or consent dialog, a reader's PIN pad) is used only when
+the caller passes or returns `KEYSTORE_PROMPT`.
+
+```python
+class Prompt(enum.Enum):
+    KEYSTORE = "keystore"
+KEYSTORE_PROMPT = Prompt.KEYSTORE
+
+@dataclass(frozen=True)
+class PinRequest:
+    backend: str          # "cng" or "pkcs11"
+    token: str            # PKCS#11 token label; CNG: the certificate's friendly name
+    certificate: str      # subject of the certificate whose key needs it; "" when listing
+    purpose: str          # "list", "sign" or "per-signature"
+    keystore_prompt: bool # whether KEYSTORE_PROMPT can work (PIN pad / Windows dialog)
+
+PinCallback = Callable[[PinRequest], str | Prompt | None]
+PinSource = str | Prompt | PinCallback | None
+PasswordSource = str | bytes | Callable[[], str | bytes | None] | None
+```
+
+A backend's `pin=` takes a `PinSource`: the PIN; `KEYSTORE_PROMPT`; a
+callback, which decides per request how to get the PIN (prompt, read a vault,
+cache, decline) and returns it, `KEYSTORE_PROMPT`, or `None` to decline; or
+`None`, meaning no PIN. The callback is consulted only when the keystore
+actually needs the user, and every time it does: `purpose="list"` (logging
+in to see a token's private keys; declining just lists what is visible),
+`"sign"` (before signing; declining fails the signature), `"per-signature"`
+(the key demands the PIN for every signature, `CKA_ALWAYS_AUTHENTICATE`). It
+runs on the thread doing the TLS handshake; an exception it raises fails that
+handshake (or the listing) and propagates from `identities()`. A callback
+returning anything else raises `TypeError` (the message never includes the
+value). `PinRequest` never holds a PIN.
+
+Loaders take a `PasswordSource` for encrypted keys: a value, or a callable
+that is called only if the key turns out to be encrypted (returning `None`
+fails with `CredentialError`). OpenSSL's terminal passphrase prompt is never
+used.
+
+```python
+def ask(request: sslcontext.PinRequest):
+    if request.purpose == "list":
+        return None                       # list without logging in
+    return getpass(f"PIN for {request.token} ({request.certificate}): ")
+
+backend = PKCS11Backend(pin=ask)
+```
+
 ## Keystores (`sslcontext.backends`)
 
 ```python
@@ -185,14 +238,17 @@ taken name raises `ValueError`.
 ```python
 class CNGBackend(Backend):
     def __init__(self, store: str = "MY", location: str = "current_user", *,
-                 pin: str | None = None, silent: bool = False)
+                 pin: PinSource = None)
 ```
 
 `store` is a system store name (`"MY"` = Personal). `location` is
-`"current_user"` or `"local_machine"` (else `ValueError`). `pin` is set on
-smart-card keys instead of showing Windows' PIN dialog; `silent=True` makes a
-key that needs a dialog fail instead. `label` is the certificate's Windows
-friendly name. The chain is what Windows can build from its stores without
+`"current_user"` or `"local_machine"` (else `ValueError`). Keys are opened
+and used silently; only when Windows reports that a key needs the user
+(`NTE_SILENT_CONTEXT`, a smart card without its PIN) is `pin` consulted
+(`purpose="sign"`): a PIN is set on the key (`SmartCardPin`) and the
+signature retried silently; `KEYSTORE_PROMPT` reopens the key with Windows'
+dialogs allowed; no PIN fails with `KeystoreError` (`errno.EACCES`). A wrong
+PIN is never retried. `label` is the certificate's Windows friendly name. The chain is what Windows can build from its stores without
 network access, root excluded. A key that only a legacy CryptoAPI CSP can use
 has `signer.supports_pss == False` (TLS 1.2 only); legacy *software* CSP keys
 open through CNG and support TLS 1.3. On a non-Windows system, `identities()`
@@ -207,8 +263,6 @@ sslcontext.load_identity(ctx, CNGBackend().find_identity(subject="alice"))
 ```
 
 ```python
-PinSource = str | Callable[[str], str] | None
-
 class PKCS11Backend(Backend):
     def __init__(self, module: str | os.PathLike | None = None, *,
                  token: str | None = None, slot: int | None = None,
@@ -223,13 +277,15 @@ Linux, else OpenSC (`opensc-pkcs11.dll`/`.so`). Missing → `KeystoreError`
 number, `slot` only that slot id; uninitialised tokens are skipped.
 `tokens()` lists the matching token labels.
 
-`pin` is the user PIN, or a callable that receives the token label and
-returns the PIN; the callable is asked at every login, so it can prompt. With
-`pin=None` a token with a PIN pad (`CKF_PROTECTED_AUTHENTICATION_PATH`) is
-logged in through the pad; any other login-required token lists the
+`pin` is a `PinSource`. It is consulted only when the token is not
+already logged in for this process (and for every signature by an
+always-authenticate key). `KEYSTORE_PROMPT` logs in through the reader's PIN
+pad (`CKF_PROTECTED_AUTHENTICATION_PATH`); on a token without one it fails
+at once ("has no PIN pad"). With no PIN, a login-required token lists the
 certificates that carry a `CKA_ID` (keys may be hidden until login) and its
-signers fail with `KeystoreError` "needs a PIN". A wrong PIN raises
-`KeystoreError` naming `CKR_PIN_INCORRECT`; `errno` holds the `CKR_*` value.
+signers fail at once with `KeystoreError` ("none was given"). A wrong PIN
+raises `KeystoreError` naming `CKR_PIN_INCORRECT` and is not retried; `errno`
+holds the `CKR_*` value.
 
 An identity is a `CKO_CERTIFICATE` (X.509) and the `CKO_PRIVATE_KEY` with the
 same `CKA_ID`; `label` is the certificate's `CKA_LABEL`; the chain is the
@@ -250,7 +306,7 @@ never finalised.
 from sslcontext.backends import PKCS11Backend
 
 backend = PKCS11Backend("/usr/lib64/pkcs11/opensc-pkcs11.so",
-                        pin=lambda token: getpass(f"PIN for {token}: "))
+                        pin=lambda request: getpass(f"PIN for {request.token}: "))
 sslcontext.load_identity(ctx, backend.find_identity(label="Certificate for PIV Authentication"))
 ```
 
@@ -258,7 +314,7 @@ sslcontext.load_identity(ctx, backend.find_identity(label="Certificate for PIV A
 
 ```python
 class SoftwareSigner:
-    def __init__(self, key: bytes | str, password: str | bytes | None = None)
+    def __init__(self, key: bytes | str, password: PasswordSource = None)
     calls: list[tuple[str, Padding | None, int | None]]
     def sign(self, digest, *, hash, padding=None, salt_length=None) -> bytes
 
@@ -295,9 +351,9 @@ All in `sslcontext.exceptions`, re-exported from the root.
 - `sslcontext` drives the OpenSSL that the running interpreter's `ssl` module
   loaded, through ctypes. It does not work with LibreSSL (Apple's
   `/usr/bin/python3`) and needs OpenSSL 1.1.1 or later.
-- Smart-card PIN dialogs and other keystore prompts happen inside the TLS
-  handshake, on the thread doing it; in asyncio that blocks the event loop.
-  Pass `pin=` or do the first handshake off the loop.
+- PIN callbacks, and with `KEYSTORE_PROMPT` the keystore's own dialogs, run
+  inside the TLS handshake on the thread doing it; in asyncio a callback that
+  waits for a person blocks the event loop. Without either, nothing waits.
 - PKCS#11 login state belongs to the process and the token: once any
   session logged in, later logins succeed without checking the PIN, until
   every session on that token is closed.

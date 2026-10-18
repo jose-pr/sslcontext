@@ -7,6 +7,14 @@ from importlib.metadata import PackageNotFoundError, version
 from ._context import VerifyLike, create_context
 from ._identity import HASHES, CertificateInfo, Identity, Padding, Signer
 from ._load import BytesOrText, load_identity, load_pem, load_pkcs12
+from ._pin import (
+    KEYSTORE_PROMPT,
+    PasswordSource,
+    PinCallback,
+    PinRequest,
+    PinSource,
+    Prompt,
+)
 from .exceptions import (
     CredentialError,
     IdentityNotFoundError,
@@ -28,8 +36,14 @@ __all__ = [
     "HASHES",
     "Identity",
     "IdentityNotFoundError",
+    "KEYSTORE_PROMPT",
     "KeystoreError",
     "Padding",
+    "PasswordSource",
+    "PinCallback",
+    "PinRequest",
+    "PinSource",
+    "Prompt",
     "Signer",
     "SigningError",
     "SSLContextError",

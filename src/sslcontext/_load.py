@@ -12,6 +12,7 @@ from ._openssl import _keys
 from ._openssl._errors import drain_errors
 from ._openssl._objects import read_certificates, read_pkcs12, read_private_key
 from ._openssl._signing import make_private_key
+from ._pin import PasswordSource, resolve_password
 from .exceptions import CredentialError
 
 __all__ = ["BytesOrText", "load_identity", "load_pem", "load_pkcs12"]
@@ -36,12 +37,21 @@ def _as_bytes(value: BytesOrText, name: str) -> bytes:
     raise TypeError(f"{name} must be bytes or str, not {type(value).__name__}")
 
 
-def _password(value: str | bytes | None) -> bytes | None:
-    if value is None or isinstance(value, bytes):
-        return value
-    if isinstance(value, str):
-        return value.encode("utf-8")
-    raise TypeError(f"password must be str or bytes, not {type(value).__name__}")
+def read_key_with(lib: OpenSSL, data: bytes, password: PasswordSource) -> int:
+    """Read a private key, consulting ``password`` only if the key is encrypted.
+
+    A callable is not called for an unencrypted key, so it never prompts
+    needlessly; when it gives nothing, an encrypted key fails at once.
+    """
+    if not callable(password):
+        return read_private_key(lib, data, resolve_password(password))
+    try:
+        return read_private_key(lib, data, None)
+    except CredentialError:
+        given = resolve_password(password)
+        if given is None:
+            raise
+        return read_private_key(lib, data, given)
 
 
 def install(
@@ -82,13 +92,14 @@ def load_pem(
     context: ssl.SSLContext,
     certificate: BytesOrText,
     key: BytesOrText | None = None,
-    password: str | bytes | None = None,
+    password: PasswordSource = None,
 ) -> None:
     """Load a certificate, its chain and its private key from memory.
 
     ``certificate`` is PEM (the leaf first, then any chain certificates) or a
     single DER certificate. ``key`` is a PEM or DER private key; when omitted
     it is read from ``certificate``, which then holds both. ``password``
+    (a value, or a callable asked only if the key turns out encrypted)
     decrypts an encrypted key. Nothing is written to disk.
 
     Raises :class:`CredentialError` for malformed data, a wrong password, or a
@@ -99,7 +110,7 @@ def load_pem(
     key_data = certificate_data if key is None else _as_bytes(key, "key")
     certificates = read_certificates(lib, certificate_data)
     try:
-        private_key = read_private_key(lib, key_data, _password(password))
+        private_key = read_key_with(lib, key_data, password)
         try:
             install(lib, context, certificates[0], certificates[1:], private_key)
         finally:
@@ -112,7 +123,7 @@ def load_pem(
 def load_pkcs12(
     context: ssl.SSLContext,
     data: bytes | bytearray | memoryview,
-    password: str | bytes | None = None,
+    password: PasswordSource = None,
 ) -> None:
     """Load the key, certificate and chain of a PKCS#12 (``.p12``/``.pfx``) bundle.
 
@@ -121,7 +132,18 @@ def load_pkcs12(
     if not isinstance(data, (bytes, bytearray, memoryview)):
         raise TypeError(f"data must be bytes, not {type(data).__name__}")
     lib = openssl()
-    key, certificate, chain = read_pkcs12(lib, bytes(data), _password(password))
+    if callable(password):
+        try:
+            key, certificate, chain = read_pkcs12(lib, bytes(data), None)
+        except CredentialError:
+            given = resolve_password(password)
+            if given is None:
+                raise
+            key, certificate, chain = read_pkcs12(lib, bytes(data), given)
+    else:
+        key, certificate, chain = read_pkcs12(
+            lib, bytes(data), resolve_password(password)
+        )
     try:
         install(lib, context, certificate, chain, key)
     finally:

@@ -13,10 +13,11 @@ import errno
 import sys
 import threading
 from ctypes import POINTER, byref, c_size_t, c_void_p, c_wchar_p
-from typing import Iterator, List, Optional
+from typing import Callable, Iterator, List, Optional, TypeVar
 
 from .._asn1 import ecdsa_der
 from .._identity import Identity, Padding
+from .._pin import KEYSTORE_PROMPT, PinRequest, PinSource, resolve_pin
 from ..exceptions import KeystoreError, SigningError
 from . import Backend
 
@@ -28,7 +29,6 @@ _CERT_STORE_OPEN_EXISTING_FLAG = 0x4000
 _CERT_STORE_READONLY_FLAG = 0x8000
 _CERT_KEY_PROV_INFO_PROP_ID = 2
 _CERT_FRIENDLY_NAME_PROP_ID = 11
-_CRYPT_ACQUIRE_CACHE_FLAG = 0x1
 _CRYPT_ACQUIRE_SILENT_FLAG = 0x40
 _CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG = 0x20000
 _CERT_NCRYPT_KEY_SPEC = 0xFFFFFFFF
@@ -36,6 +36,10 @@ _CERT_CHAIN_CACHE_ONLY_URL_RETRIEVAL = 0x80000000
 _CERT_TRUST_IS_SELF_SIGNED = 0x8
 _BCRYPT_PAD_PKCS1, _BCRYPT_PAD_PSS = 0x2, 0x8
 _NCRYPT_SILENT_FLAG = 0x40
+# Results meaning "this needs the user": NTE_SILENT_CONTEXT, and a smart card
+# that has not been given its PIN (SCARD_W_CARD_NOT_AUTHENTICATED).
+_NEEDS_USER = {0x80090022, 0x8010006F}
+T = TypeVar("T")
 _NCRYPT_PIN_PROPERTY = "SmartCardPin"
 _HP_HASHVAL = 2
 _PP_SIGNATURE_PIN = 33
@@ -222,54 +226,69 @@ def _context_der(context: "ctypes._Pointer[_CERT_CONTEXT]") -> bytes:
 
 
 class _CNGSigner:
-    """Signs with the private key of one certificate in a Windows store."""
+    """Signs with the private key of one certificate in a Windows store.
+
+    Every call is silent first. When Windows says the key needs the user
+    (a smart-card PIN, a consent dialog), the PIN source decides: a PIN is
+    set on the key and the signature retried silently, ``KEYSTORE_PROMPT``
+    reopens the key with Windows' own dialogs allowed, and nothing fails at
+    once. A wrong PIN is never retried, so a card cannot be locked by it.
+    """
 
     def __init__(
         self,
         context: "ctypes._Pointer[_CERT_CONTEXT]",
-        pin: Optional[str],
-        silent: bool,
+        pin: PinSource,
+        label: str,
     ) -> None:
         self._win = _windows()
         self._context = self._win.crypt32.CertDuplicateCertificateContext(context)
         self._pin = pin
-        self._silent = silent
+        self._label = label
+        self._subject = ""
         self._lock = threading.Lock()
         self._key = 0
         self._key_spec = 0
-        self._free_key = False
+        self._silent = True
 
     def __repr__(self) -> str:
-        return "<CNGSigner>"
+        return f"<CNGSigner {self._label!r}>"
 
     def _acquire(self) -> None:
         if self._key:
             return
         win = self._win
         key, spec, free = c_size_t(), ctypes.c_uint32(), ctypes.c_int()
-        flags = _CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG | _CRYPT_ACQUIRE_CACHE_FLAG
+        # Not cached on the certificate: a silent handle must be replaceable
+        # by one allowed to show dialogs.
+        flags = _CRYPT_ACQUIRE_PREFER_NCRYPT_KEY_FLAG
         if self._silent:
             flags |= _CRYPT_ACQUIRE_SILENT_FLAG
         if not win.crypt32.CryptAcquireCertificatePrivateKey(
             self._context, flags, None, byref(key), byref(spec), byref(free)
         ):
             raise _last_error("CryptAcquireCertificatePrivateKey")
-        self._key, self._key_spec, self._free_key = (
-            key.value,
-            spec.value,
-            bool(free.value),
-        )
-        if self._pin is None:
-            return
+        self._key, self._key_spec = key.value, spec.value
+
+    def _release(self) -> None:
+        if self._key:
+            if self._key_spec == _CERT_NCRYPT_KEY_SPEC:
+                self._win.ncrypt.NCryptFreeObject(self._key)
+            else:
+                self._win.advapi32.CryptReleaseContext(self._key, 0)
+        self._key = 0
+
+    def _set_pin(self, pin: str) -> None:
+        win = self._win
         if self._key_spec == _CERT_NCRYPT_KEY_SPEC:
-            pin = ctypes.create_unicode_buffer(self._pin)
+            buffer = ctypes.create_unicode_buffer(pin)
             status = win.ncrypt.NCryptSetProperty(
-                self._key, _NCRYPT_PIN_PROPERTY, pin, ctypes.sizeof(pin), 0
+                self._key, _NCRYPT_PIN_PROPERTY, buffer, ctypes.sizeof(buffer), 0
             )
             if status:
                 raise _status_error("setting the smart card PIN", status)
         elif not win.advapi32.CryptSetProvParam(
-            self._key, _PP_SIGNATURE_PIN, self._pin.encode() + b"\0", 0
+            self._key, _PP_SIGNATURE_PIN, pin.encode() + b"\0", 0
         ):
             raise _last_error("setting the smart card PIN")
 
@@ -277,7 +296,7 @@ class _CNGSigner:
     def supports_pss(self) -> bool:
         """``False`` for a key only a legacy CryptoAPI provider can use."""
         with self._lock:
-            self._acquire()
+            self._attempt(lambda: None)
             return self._key_spec == _CERT_NCRYPT_KEY_SPEC
 
     def sign(
@@ -288,11 +307,47 @@ class _CNGSigner:
         padding: Optional[Padding] = None,
         salt_length: Optional[int] = None,
     ) -> bytes:
-        with self._lock:
-            self._acquire()
+        def once() -> bytes:
             if self._key_spec == _CERT_NCRYPT_KEY_SPEC:
                 return self._sign_cng(digest, hash, padding, salt_length)
             return self._sign_legacy(digest, hash, padding)
+
+        with self._lock:
+            return self._attempt(once)
+
+    def _attempt(self, operation: Callable[[], T]) -> T:
+        """Run ``operation`` on the key, asking the PIN source only if needed."""
+        try:
+            self._acquire()
+            return operation()
+        except KeystoreError as error:
+            if error.errno not in _NEEDS_USER:
+                raise
+            needed = error
+        if not self._subject:
+            from .._openssl import openssl
+            from .._openssl._objects import certificate_fields
+
+            self._subject = certificate_fields(openssl(), _context_der(self._context))[
+                "subject"
+            ]
+        answer = resolve_pin(
+            self._pin, PinRequest("cng", self._label, self._subject, "sign", True)
+        )
+        if answer is None:
+            raise KeystoreError(
+                errno.EACCES,
+                f"the key of {self._subject!r} needs a PIN or the user's consent "
+                f"and none was given (pin=): {needed}",
+            ) from needed
+        if answer is KEYSTORE_PROMPT:
+            self._release()
+            self._silent = False
+            self._acquire()
+        else:
+            self._acquire()
+            self._set_pin(answer)
+        return operation()
 
     def _sign_cng(
         self, digest: bytes, hash: str, padding: Optional[Padding], salt: Optional[int]
@@ -364,12 +419,7 @@ class _CNGSigner:
 
     def close(self) -> None:
         with self._lock:
-            if self._key and self._free_key:
-                if self._key_spec == _CERT_NCRYPT_KEY_SPEC:
-                    self._win.ncrypt.NCryptFreeObject(self._key)
-                else:
-                    self._win.advapi32.CryptReleaseContext(self._key, 0)
-            self._key = 0
+            self._release()
             if self._context:
                 self._win.crypt32.CertFreeCertificateContext(self._context)
                 self._context = None
@@ -385,9 +435,11 @@ class CNGBackend(Backend):
     """A Windows system certificate store, e.g. ``CurrentUser\\MY``.
 
     ``store`` is the store name (``"MY"`` holds personal certificates);
-    ``location`` is ``"current_user"`` or ``"local_machine"``. ``pin`` is
-    given to smart-card keys instead of a PIN dialog; ``silent=True`` makes
-    any key that would need a dialog fail instead.
+    ``location`` is ``"current_user"`` or ``"local_machine"``. ``pin`` is a
+    PIN, :data:`~sslcontext.KEYSTORE_PROMPT` (allow Windows' own PIN and
+    consent dialogs), or a callback given a :class:`~sslcontext.PinRequest`.
+    It is consulted only when a key cannot be used silently; with no PIN,
+    such a key fails instead of showing a dialog.
     """
 
     name = "cng"
@@ -397,8 +449,7 @@ class CNGBackend(Backend):
         store: str = "MY",
         location: str = "current_user",
         *,
-        pin: Optional[str] = None,
-        silent: bool = False,
+        pin: PinSource = None,
     ) -> None:
         if location not in _LOCATIONS:
             raise ValueError(
@@ -409,7 +460,6 @@ class CNGBackend(Backend):
         self.store = store
         self.location = location
         self._pin = pin
-        self.silent = silent
 
     def __repr__(self) -> str:
         return f"CNGBackend(store={self.store!r}, location={self.location!r})"
@@ -435,11 +485,12 @@ class CNGBackend(Backend):
                     break
                 if not _has_private_key(win, context):
                     continue
+                label = _friendly_name(win, context)
                 yield Identity(
                     _context_der(context),
-                    _CNGSigner(context, self._pin, self.silent),
+                    _CNGSigner(context, self._pin, label),
                     tuple(_chain(win, context)),
-                    _friendly_name(win, context),
+                    label,
                 )
         finally:
             win.crypt32.CertCloseStore(handle, 0)

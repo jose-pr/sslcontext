@@ -13,10 +13,13 @@ import os
 import sys
 import threading
 from ctypes import addressof, byref, c_ulong, create_string_buffer, sizeof
-from typing import Callable, Dict, Iterator, List, Optional, Union
+from typing import Dict, Iterator, List, Optional, Union
 
 from .._asn1 import DIGEST_INFO_PREFIX, ecdsa_der
 from .._identity import Identity, Padding
+from .._openssl import openssl
+from .._openssl._objects import certificate_fields
+from .._pin import KEYSTORE_PROMPT, PinRequest, PinSource, resolve_pin
 from ..exceptions import KeystoreError, SigningError
 from . import Backend
 from ._cryptoki import (
@@ -49,10 +52,7 @@ from ._cryptoki import (
     ulong,
 )
 
-__all__ = ["PKCS11Backend", "PinSource"]
-
-PinSource = Union[str, Callable[[str], str], None]
-"""A PIN, a callable given the token label that returns one, or ``None``."""
+__all__ = ["PKCS11Backend"]
 
 _MODULE_ENV = "SSLCONTEXT_PKCS11_MODULE"
 
@@ -111,25 +111,39 @@ class _Token:
     def needs_login(self) -> bool:
         return bool(self.flags & CKF_LOGIN_REQUIRED)
 
-    @property
-    def can_login(self) -> bool:
-        return self._pin is not None or bool(
-            self.flags & CKF_PROTECTED_AUTHENTICATION_PATH
-        )
+    def login(self, session: int, purpose: str, certificate: str = "") -> bool:
+        """Log in for ``purpose`` (see :class:`PinRequest`); ``True`` once logged in.
 
-    def pin(self) -> Optional[str]:
-        """The PIN, ``None`` for a PIN pad; asks a callable every time."""
-        if callable(self._pin):
-            return self._pin(self.label)
-        if self._pin is None and not self.flags & CKF_PROTECTED_AUTHENTICATION_PATH:
+        Asks the PIN source only when the application is not logged in yet,
+        or for every ``"per-signature"`` login. Without a PIN, a ``"list"``
+        login returns ``False`` and any other raises ``KeystoreError`` at
+        once; the PIN pad is used only when the source says
+        ``KEYSTORE_PROMPT``.
+        """
+        per_signature = purpose == "per-signature"
+        if not per_signature and self.module.logged_in(session):
+            return True
+        pin_pad = bool(self.flags & CKF_PROTECTED_AUTHENTICATION_PATH)
+        answer = resolve_pin(
+            self._pin, PinRequest("pkcs11", self.label, certificate, purpose, pin_pad)
+        )
+        if answer is KEYSTORE_PROMPT and not pin_pad:
+            if purpose == "list":
+                return False
             raise KeystoreError(
                 errno.EACCES,
-                f"token {self.label!r} needs a PIN; pass pin= to PKCS11Backend",
+                f"token {self.label!r} has no PIN pad, so KEYSTORE_PROMPT cannot log in",
             )
-        return self._pin
-
-    def login(self, session: int, user: int = CKU_USER) -> None:
-        self.module.login(session, user, self.pin())
+        if answer is None:
+            if purpose == "list":
+                return False
+            raise KeystoreError(
+                errno.EACCES,
+                f"token {self.label!r} needs a PIN and none was given (pin=)",
+            )
+        user = CKU_CONTEXT_SPECIFIC if per_signature else CKU_USER
+        self.module.login(session, user, None if answer is KEYSTORE_PROMPT else answer)
+        return True
 
     def mechanisms(self) -> List[int]:
         if self._mechanisms is None:
@@ -156,9 +170,10 @@ class _Token:
 class _PKCS11Signer:
     """Signs with the private key whose ``CKA_ID`` is ``key_id`` on ``token``."""
 
-    def __init__(self, token: _Token, key_id: bytes) -> None:
+    def __init__(self, token: _Token, key_id: bytes, subject: str) -> None:
         self._token = token
         self._key_id = key_id
+        self._subject = subject
         self._lock = threading.Lock()
         self._session = 0
         self._key = 0
@@ -177,7 +192,7 @@ class _PKCS11Signer:
         token, module = self._token, self._token.module
         self._session = module.open_session(token.slot)
         if token.needs_login:
-            token.login(self._session)
+            token.login(self._session, "sign", self._subject)
         keys = list(
             module.find(
                 self._session, {CKA_CLASS: CKO_PRIVATE_KEY, CKA_ID: self._key_id}
@@ -246,7 +261,7 @@ class _PKCS11Signer:
             mechanism, data = CK_MECHANISM(CKM_ECDSA, None, 0), digest
         module.call("C_SignInit", self._session, byref(mechanism), self._key)
         if self._always_authenticate:
-            self._token.login(self._session, CKU_CONTEXT_SPECIFIC)
+            self._token.login(self._session, "per-signature", self._subject)
         size = c_ulong()
         module.call("C_Sign", self._session, data, len(data), None, byref(size))
         signature = create_string_buffer(size.value)
@@ -264,11 +279,13 @@ class PKCS11Backend(Backend):
 
     ``module`` is the module's path; by default ``SSLCONTEXT_PKCS11_MODULE``,
     else p11-kit's proxy on Linux or OpenSC elsewhere. ``token`` limits the
-    search to a token label or serial number, ``slot`` to a slot id. ``pin``
-    is the user PIN, or a callable given the token label that returns it
-    (asked at each login, so it can prompt); ``None`` uses a PIN pad when
-    the token has one and otherwise lists only what is visible without
-    logging in.
+    search to a token label or serial number, ``slot`` to a slot id.
+
+    ``pin`` is the user PIN, :data:`~sslcontext.KEYSTORE_PROMPT` (use the
+    reader's PIN pad), or a callback given a :class:`~sslcontext.PinRequest`
+    that returns either, or ``None`` to decline. With no PIN nothing waits:
+    listing shows only what is visible without a login, and signing fails
+    with :class:`~sslcontext.exceptions.KeystoreError`.
     """
 
     name = "pkcs11"
@@ -322,10 +339,7 @@ class PKCS11Backend(Backend):
         module = token.module
         session = module.open_session(token.slot)
         try:
-            logged_in = False
-            if token.needs_login and token.can_login:
-                token.login(session)
-                logged_in = True
+            logged_in = token.needs_login and token.login(session, "list")
             certificates = []
             for handle in module.find(
                 session, {CKA_CLASS: CKO_CERTIFICATE, CKA_CERTIFICATE_TYPE: CKC_X_509}
@@ -354,10 +368,11 @@ class PKCS11Backend(Backend):
         for value, key_id, label in certificates:
             if not key_id or (key_id not in key_ids and not unseen_keys_possible):
                 continue
+            subject = certificate_fields(openssl(), value)["subject"]
             identities.append(
                 Identity(
                     value,
-                    _PKCS11Signer(token, key_id),
+                    _PKCS11Signer(token, key_id, subject),
                     tuple(_chain(value, [c[0] for c in certificates])),
                     label,
                 )
@@ -367,9 +382,6 @@ class PKCS11Backend(Backend):
 
 def _chain(leaf: bytes, pool: List[bytes]) -> List[bytes]:
     """Issuers of ``leaf`` found among the token's certificates, root excluded."""
-    from .._openssl import openssl
-    from .._openssl._objects import certificate_fields
-
     lib = openssl()
     fields: Dict[bytes, dict] = {der: certificate_fields(lib, der) for der in pool}
     chain: List[bytes] = []

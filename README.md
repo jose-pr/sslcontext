@@ -19,6 +19,9 @@ compiled extension. Documentation: <https://jose-pr.github.io/sslcontext/>.
   OpenSSL 3 provider on modern builds, an OpenSSL 1.1 engine on older ones.
 - **In-memory credentials** — load PEM or PKCS#12 bytes into a context
   without writing a key to disk.
+- **Never blocks on a PIN** — PINs and passwords come from a value or a
+  callback you write; with none, operations fail at once. Keystore dialogs
+  and PIN pads are opt-in.
 - **One context builder** — `create_context()` for the verify/cafile/capath
   combinations every HTTP client reimplements.
 
@@ -58,13 +61,19 @@ sslcontext.load_identity(ctx, CNGBackend().find_identity(subject="alice"))
 urllib.request.urlopen("https://mtls.example.com/", context=ctx)
 ```
 
-Use a smart card through its PKCS#11 module, asking for the PIN:
+Use a smart card through its PKCS#11 module. The PIN callback decides how
+the PIN is obtained; with no PIN, signing fails instead of waiting:
 
 ```python
 from getpass import getpass
 from sslcontext.backends import PKCS11Backend
 
-card = PKCS11Backend(pin=lambda token: getpass(f"PIN for {token}: "))
+def pin(request: sslcontext.PinRequest):
+    if request.purpose == "list":
+        return None  # list without logging in
+    return getpass(f"PIN for {request.token}: ")
+
+card = PKCS11Backend(pin=pin)
 sslcontext.load_identity(ctx, card.find_identity(subject="alice"))
 ```
 

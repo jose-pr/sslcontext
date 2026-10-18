@@ -145,6 +145,20 @@ class CK_C_INITIALIZE_ARGS(ctypes.Structure):
     ]
 
 
+class CK_SESSION_INFO(ctypes.Structure):
+    if _PACK:
+        _pack_ = _PACK
+    _fields_ = [
+        ("slotID", CK_ULONG),
+        ("state", CK_ULONG),
+        ("flags", CK_ULONG),
+        ("ulDeviceError", CK_ULONG),
+    ]
+
+
+# CKS_RO_USER_FUNCTIONS, CKS_RW_USER_FUNCTIONS, CKS_RW_SO_FUNCTIONS
+_LOGGED_IN_STATES = {1, 3, 4}
+
 _P, _UL, _PUL = c_void_p, CK_ULONG, POINTER(CK_ULONG)
 # Position in CK_FUNCTION_LIST (after the version) and argument types.
 _FUNCTIONS = {
@@ -154,6 +168,7 @@ _FUNCTIONS = {
     "C_GetMechanismList": (7, [_UL, _PUL, _PUL]),
     "C_OpenSession": (12, [_UL, _UL, _P, _P, _PUL]),
     "C_CloseSession": (13, [_UL]),
+    "C_GetSessionInfo": (15, [_UL, POINTER(CK_SESSION_INFO)]),
     "C_Login": (18, [_UL, _UL, c_char_p, _UL]),
     "C_GetAttributeValue": (24, [_UL, _UL, POINTER(CK_ATTRIBUTE), _UL]),
     "C_FindObjectsInit": (26, [_UL, POINTER(CK_ATTRIBUTE), _UL]),
@@ -240,6 +255,12 @@ class Module:
         session = CK_ULONG()
         self.call("C_OpenSession", slot, CKF_SERIAL_SESSION, None, None, byref(session))
         return session.value
+
+    def logged_in(self, session: int) -> bool:
+        """Whether the token is already logged in for this application."""
+        info = CK_SESSION_INFO()
+        self.call("C_GetSessionInfo", session, byref(info))
+        return info.state in _LOGGED_IN_STATES
 
     def close_session(self, session: int) -> None:
         self._functions["C_CloseSession"](session)
