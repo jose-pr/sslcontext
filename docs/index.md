@@ -18,7 +18,6 @@ Requires Python 3.9 or newer.
 
 | Extra | Adds | Needed for |
 | --- | --- | --- |
-| `system` | `truststore` (Python 3.10+) | `system_context()` verifying servers through the operating system |
 | `cli` | `duho` | the `sslcontext` command |
 
 ## 30-second tour

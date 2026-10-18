@@ -11,9 +11,9 @@ Import everything from the root `sslcontext`, except the errors, which live in
 backends (`sslcontext.backends`) and the test helpers (`sslcontext.testing`).
 Modules whose names start with `_` are private.
 
-`pip install sslcontext`. No runtime dependencies; the extra `system` adds
-`truststore` (Python 3.10+) for `system_context()`'s OS verification; the
-extra `cli` adds the `sslcontext` command (duho).
+`pip install sslcontext`. One dependency, `truststore` (Python 3.10+ only),
+for `system_context()`'s OS verification; the extra `cli` adds the
+`sslcontext` command (duho).
 
 `sslcontext.__version__` is the installed distribution's version.
 
@@ -62,8 +62,8 @@ def system_sources(*, pin: PinSource = None) -> list[Backend]
 `system_context()` is a client context that behaves like the system's
 browser. Servers are verified by the operating system (a
 `truststore.SSLContext`: CryptoAPI on Windows, the Security framework on
-macOS) when the `system` extra is installed, else by OpenSSL over the default
-store; `verify`/`cafile`/`capath`/`cadata` replace that trust exactly as for
+macOS) on Python 3.10+, and by OpenSSL over the default store on 3.9
+(truststore needs 3.10); `verify`/`cafile`/`capath`/`cadata` replace that trust exactly as for
 `create_context`. When a server asks for a client certificate, `selector`
 answers (default `system_selector(pin=pin)`; `False`: never send one).
 `post_handshake_auth` is on. Nothing is opened until a server asks; one

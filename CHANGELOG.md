@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   identities, `probe URL` to see a server's certificate request, the
   candidates and the certificate sent.
 - `system_context()`: a client context that behaves like the system's
-  browser: OS verification through truststore (extra `system`) and
+  browser: OS verification through truststore (a dependency on Python 3.10+) and
   client certificates chosen when the server asks by a
   `ClientCertificateSelector` over `system_sources()` (the Windows
   Personal store, the default PKCS#11 module elsewhere), filtered as a

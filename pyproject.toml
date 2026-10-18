@@ -20,14 +20,14 @@ classifiers = [
     "Topic :: Security :: Cryptography",
     "Typing :: Typed",
 ]
-dependencies = []
+# system_context(): the operating system verifies servers (truststore needs 3.10;
+# 3.9 verifies through OpenSSL over the default store).
+dependencies = ['truststore>=0.10,<0.11; python_version >= "3.10"']
 
 [project.optional-dependencies]
-# system_context(): the operating system verifies servers (truststore needs 3.10).
-system = ['truststore>=0.10,<0.11; python_version >= "3.10"']
 # The sslcontext command; only sslcontext.cli imports duho.
 cli = ["duho>=0.7.4,<0.8"]
-dev = ["black", "build", "pytest", "sslcontext[system,cli]"]
+dev = ["black", "build", "pytest", "sslcontext[cli]"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
 
 [project.scripts]

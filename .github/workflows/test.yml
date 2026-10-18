@@ -150,12 +150,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install with no extra
         run: python -m pip install .
-      - name: The library imports and builds the system context
+      - name: The library imports and builds the system context (truststore on 3.10+)
         shell: bash
         working-directory: ${{ runner.temp }}
         run: |
           python - <<'PY'
           import ssl
+          import sys
           from importlib.resources import files
 
           import sslcontext
@@ -165,7 +166,9 @@ jobs:
               assert (root / name).is_file(), "the install does not ship %s" % name
           context = sslcontext.system_context()
           assert isinstance(context, ssl.SSLContext)
-          assert type(context).__module__ == "ssl", "truststore came without its extra"
+          want = "truststore" if sys.version_info >= (3, 10) else "ssl"
+          got = type(context).__module__.split(".")[0]
+          assert got == want, "system_context() is %s's, expected %s's" % (got, want)
           print("ok:", sslcontext.__version__)
           PY
       - name: The command line without its extra names the extra

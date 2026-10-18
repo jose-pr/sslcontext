@@ -42,8 +42,7 @@ browser would. Documentation: <https://jose-pr.github.io/sslcontext/>.
 ## Installation
 
 ```bash
-pip install sslcontext            # no dependencies
-pip install "sslcontext[system]"  # + truststore: the OS verifies servers
+pip install sslcontext
 ```
 
 ## Quick start
