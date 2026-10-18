@@ -15,6 +15,7 @@ import threading
 from ctypes import POINTER, byref, c_size_t, c_void_p, c_wchar_p
 from typing import Iterator, List, Optional
 
+from .._asn1 import ecdsa_der
 from .._identity import Identity, Padding
 from ..exceptions import KeystoreError, SigningError
 from . import Backend
@@ -218,27 +219,6 @@ def _context_der(context: "ctypes._Pointer[_CERT_CONTEXT]") -> bytes:
     return ctypes.string_at(
         context.contents.pbCertEncoded, context.contents.cbCertEncoded
     )
-
-
-def _der_integer(value: bytes) -> bytes:
-    value = value.lstrip(b"\0") or b"\0"
-    if value[0] & 0x80:
-        value = b"\0" + value
-    return b"\x02" + _der_length(len(value)) + value
-
-
-def _der_length(size: int) -> bytes:
-    if size < 0x80:
-        return bytes([size])
-    encoded = size.to_bytes((size.bit_length() + 7) // 8, "big")
-    return bytes([0x80 | len(encoded)]) + encoded
-
-
-def ecdsa_der(raw: bytes) -> bytes:
-    """CNG's ``r || s`` ECDSA signature as the DER ``SEQUENCE`` TLS expects."""
-    half = len(raw) // 2
-    body = _der_integer(raw[:half]) + _der_integer(raw[half:])
-    return b"\x30" + _der_length(len(body)) + body
 
 
 class _CNGSigner:

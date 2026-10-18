@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `CNGBackend` for Windows certificate stores: non-exportable, TPM and
   smart-card keys through CNG, and legacy CryptoAPI CSP keys (PKCS#1 v1.5,
   TLS 1.2).
+- `PKCS11Backend` for PKCS#11 tokens: smart cards (real and virtual, through
+  OpenSC), HSMs, TPMs and software tokens. RSA PKCS#1 v1.5 and PSS and
+  ECDSA, PINs given directly, by a callable or through a PIN pad,
+  per-signature login for `CKA_ALWAYS_AUTHENTICATE` keys, and recovery after
+  the card is removed and reinserted. `SSLCONTEXT_PKCS11_MODULE` selects the
+  default module.
 
 ### Changed
 

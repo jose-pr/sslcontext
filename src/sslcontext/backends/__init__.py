@@ -7,6 +7,7 @@ keystore and finds one by a query. Built-in backends:
 name       class                            keystore
 ========== ================================ =====================================
 ``cng``    :class:`CNGBackend`              Windows certificate stores (CNG/CAPI)
+``pkcs11`` :class:`PKCS11Backend`           PKCS#11 tokens: smart cards, HSMs, TPMs
 ========== ================================ =====================================
 
 Third-party backends register under the entry-point group
@@ -24,10 +25,11 @@ from typing import Any, ClassVar, Dict, Iterator, List, Optional, Type, Union
 from .._identity import Identity
 from ..exceptions import IdentityNotFoundError
 
-__all__ = ["Backend", "CNGBackend", "get", "names", "register_backend"]
+__all__ = ["Backend", "CNGBackend", "PKCS11Backend", "get", "names", "register_backend"]
 
 _BUILTINS: Dict[str, str] = {
     "cng": "sslcontext.backends._cng:CNGBackend",
+    "pkcs11": "sslcontext.backends._pkcs11:PKCS11Backend",
 }
 _registry: Dict[str, Union[str, Type["Backend"]]] = {}
 _lock = threading.Lock()

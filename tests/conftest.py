@@ -15,6 +15,9 @@ def data(name: str) -> bytes:
     return (DATA / name).read_bytes()
 
 
+_SHORT = {"organizationName": "O", "organizationalUnitName": "OU", "countryName": "C"}
+
+
 class Handshake(NamedTuple):
     client_cn: str
     version: str
@@ -24,7 +27,8 @@ class TLSServer:
     """A loopback TLS server that requires a client certificate from the test CA.
 
     For each connection it completes the handshake and answers with the
-    client certificate's common name and the negotiated protocol version.
+    client certificate's common name (its whole subject when it has none)
+    and the negotiated protocol version.
     """
 
     def __init__(
@@ -68,7 +72,10 @@ class TLSServer:
             try:
                 with self.context.wrap_socket(raw, server_side=True) as tls:
                     subject = dict(item[0] for item in tls.getpeercert()["subject"])
-                    tls.sendall(f"{subject['commonName']}\n{tls.version()}".encode())
+                    name = subject.get("commonName") or ",".join(
+                        f"{_SHORT.get(k, k)}={v}" for k, v in subject.items()
+                    )
+                    tls.sendall(f"{name}\n{tls.version()}".encode())
             except (OSError, ssl.SSLError) as error:
                 self.errors.append(error)
                 raw.close()

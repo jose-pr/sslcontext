@@ -180,6 +180,7 @@ taken name raises `ValueError`.
 | Name | Class | Keystore |
 | --- | --- | --- |
 | `cng` | `CNGBackend` | Windows certificate stores; keys in CNG providers (software, TPM, smart cards and virtual smart cards via minidrivers) or legacy CryptoAPI CSPs |
+| `pkcs11` | `PKCS11Backend` | PKCS#11 tokens: smart cards (real or virtual) through OpenSC, HSMs, TPMs (tpm2-pkcs11), SoftHSM; any OS |
 
 ```python
 class CNGBackend(Backend):
@@ -203,6 +204,54 @@ from sslcontext.backends import CNGBackend
 
 ctx = sslcontext.create_context()
 sslcontext.load_identity(ctx, CNGBackend().find_identity(subject="alice"))
+```
+
+```python
+PinSource = str | Callable[[str], str] | None
+
+class PKCS11Backend(Backend):
+    def __init__(self, module: str | os.PathLike | None = None, *,
+                 token: str | None = None, slot: int | None = None,
+                 pin: PinSource = None)
+    def tokens(self) -> list[str]
+```
+
+`module` is the PKCS#11 library; default: `SSLCONTEXT_PKCS11_MODULE`, else
+p11-kit's proxy (`p11-kit-proxy.so`, every module the system configured) on
+Linux, else OpenSC (`opensc-pkcs11.dll`/`.so`). Missing → `KeystoreError`
+(`errno.ENOENT`). `token` keeps only the token with that label or serial
+number, `slot` only that slot id; uninitialised tokens are skipped.
+`tokens()` lists the matching token labels.
+
+`pin` is the user PIN, or a callable that receives the token label and
+returns the PIN; the callable is asked at every login, so it can prompt. With
+`pin=None` a token with a PIN pad (`CKF_PROTECTED_AUTHENTICATION_PATH`) is
+logged in through the pad; any other login-required token lists the
+certificates that carry a `CKA_ID` (keys may be hidden until login) and its
+signers fail with `KeystoreError` "needs a PIN". A wrong PIN raises
+`KeystoreError` naming `CKR_PIN_INCORRECT`; `errno` holds the `CKR_*` value.
+
+An identity is a `CKO_CERTIFICATE` (X.509) and the `CKO_PRIVATE_KEY` with the
+same `CKA_ID`; `label` is the certificate's `CKA_LABEL`; the chain is the
+issuers found among the token's own certificates, root excluded. Signing uses
+`CKM_RSA_PKCS` (over a DigestInfo), `CKM_RSA_PKCS_PSS` and `CKM_ECDSA`;
+`signer.supports_pss` reports whether the token offers PSS. A key with
+`CKA_ALWAYS_AUTHENTICATE` (a PIV card's signature key, slot 9C) gets
+`C_Login(CKU_CONTEXT_SPECIFIC)` before every signature. Each signer keeps
+one session, serialised by a lock. When the card is removed and reinserted,
+the next signature finds the token again by label and serial number, opens
+a new session and logs in again; it fails with `KeystoreError` if the token
+is still absent.
+
+Modules are loaded once per path, initialised with `CKF_OS_LOCKING_OK`, and
+never finalised.
+
+```python
+from sslcontext.backends import PKCS11Backend
+
+backend = PKCS11Backend("/usr/lib64/pkcs11/opensc-pkcs11.so",
+                        pin=lambda token: getpass(f"PIN for {token}: "))
+sslcontext.load_identity(ctx, backend.find_identity(label="Certificate for PIV Authentication"))
 ```
 
 ## Test helpers (`sslcontext.testing`)
@@ -235,6 +284,12 @@ All in `sslcontext.exceptions`, re-exported from the root.
 | `KeystoreError` | `SSLContextError`, `OSError` | the keystore refused or failed an operation |
 | `SigningError` | `SSLContextError` | a signer failed during a handshake |
 
+## Environment variables
+
+| Variable | Sets | Default |
+| --- | --- | --- |
+| `SSLCONTEXT_PKCS11_MODULE` | the PKCS#11 module `PKCS11Backend()` loads when `module` is not given | p11-kit proxy on Linux, OpenSC elsewhere |
+
 ## Gotchas
 
 - `sslcontext` drives the OpenSSL that the running interpreter's `ssl` module
@@ -243,6 +298,9 @@ All in `sslcontext.exceptions`, re-exported from the root.
 - Smart-card PIN dialogs and other keystore prompts happen inside the TLS
   handshake, on the thread doing it; in asyncio that blocks the event loop.
   Pass `pin=` or do the first handshake off the loop.
+- PKCS#11 login state belongs to the process and the token: once any
+  session logged in, later logins succeed without checking the PIN, until
+  every session on that token is closed.
 - `SSL_CTX_check_private_key` compares public keys only, so an `Identity`
   whose signer holds a different private key than the certificate loads
   fine and fails at the peer, which rejects the signature.

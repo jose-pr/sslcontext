@@ -27,6 +27,7 @@ compiled extension. Documentation: <https://jose-pr.github.io/sslcontext/>.
 | Backend | Platform | Keys | Extra |
 | --- | --- | --- | --- |
 | `cng` | Windows | certificate stores: software (incl. non-exportable), TPM, smart cards and virtual smart cards, legacy CryptoAPI CSPs | none |
+| `pkcs11` | any | PKCS#11 tokens: smart cards (real or virtual) via OpenSC, HSMs, TPMs, SoftHSM | none |
 
 ## Installation
 
@@ -55,6 +56,16 @@ from sslcontext.backends import CNGBackend
 ctx = sslcontext.create_context()
 sslcontext.load_identity(ctx, CNGBackend().find_identity(subject="alice"))
 urllib.request.urlopen("https://mtls.example.com/", context=ctx)
+```
+
+Use a smart card through its PKCS#11 module, asking for the PIN:
+
+```python
+from getpass import getpass
+from sslcontext.backends import PKCS11Backend
+
+card = PKCS11Backend(pin=lambda token: getpass(f"PIN for {token}: "))
+sslcontext.load_identity(ctx, card.find_identity(subject="alice"))
 ```
 
 ## API overview

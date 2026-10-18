@@ -25,6 +25,15 @@ the two venvs exercise the two OpenSSL glue paths.
 
 ## Checks
 
+Keystore tests in `tests/integration/` create what they need and skip,
+naming it, when a tool is missing: the CNG tests need Windows PowerShell; the
+PKCS#11 tests need SoftHSM2, OpenSC's `pkcs11-tool` and `openssl`, and the
+virtual smart card tests also a card inserted by
+`tests/integration/start_virtual_card.sh` (pcscd with vsmartcard's `vpcd`,
+plus a built `virt_cacard`). On aarch64, `virt_cacard` spins at 100% CPU and
+never connects unless `char c;` in `main()` is changed to `int c;` (its
+`getopt()` result never equals -1 when `char` is unsigned).
+
 ```bash
 .pyvenv/<tag>/Scripts/python -m pytest -q -rs
 .pyvenv/<tag>/Scripts/black --check src tests
