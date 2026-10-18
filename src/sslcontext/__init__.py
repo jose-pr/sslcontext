@@ -15,6 +15,14 @@ from ._pin import (
     PinSource,
     Prompt,
 )
+from ._policy import browser_policies, rules_from_policy
+from ._select import (
+    AutoSelectRule,
+    CertificateRequest,
+    Chooser,
+    ClientCertificateSelector,
+    IdentitySource,
+)
 from .exceptions import (
     CredentialError,
     IdentityNotFoundError,
@@ -30,12 +38,17 @@ except PackageNotFoundError:  # running from a checkout without an install
     __version__ = "0+unknown"
 
 __all__ = [
+    "AutoSelectRule",
     "BytesOrText",
     "CertificateInfo",
+    "CertificateRequest",
+    "Chooser",
+    "ClientCertificateSelector",
     "CredentialError",
     "HASHES",
     "Identity",
     "IdentityNotFoundError",
+    "IdentitySource",
     "KEYSTORE_PROMPT",
     "KeystoreError",
     "Padding",
@@ -50,8 +63,10 @@ __all__ = [
     "UnsupportedOpenSSLError",
     "VerifyLike",
     "__version__",
+    "browser_policies",
     "create_context",
     "load_identity",
     "load_pem",
     "load_pkcs12",
+    "rules_from_policy",
 ]

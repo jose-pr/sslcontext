@@ -17,6 +17,7 @@ from ctypes import (
     c_int,
     c_long,
     c_size_t,
+    c_uint32,
     c_uint64,
     c_ulong,
     c_void_p,
@@ -149,6 +150,26 @@ _SIGNATURES: dict[str, tuple[str, Any, tuple[Any, ...]]] = {
     "SSL_CTX_use_PrivateKey": ("ssl", c_int, (_P, _P)),
     "SSL_CTX_check_private_key": ("ssl", c_int, (_P,)),
     "SSL_CTX_ctrl": ("ssl", c_long, (_P, c_int, c_long, _P)),
+    "SSL_CTX_set_cert_cb": ("ssl", None, (_P, _P, _P)),
+    "SSL_CTX_set_client_CA_list": ("ssl", None, (_P, _P)),
+    "SSL_load_client_CA_file": ("ssl", _P, (c_char_p,)),
+    # connections: what the server asked, and the answer for this one alone
+    "SSL_is_server": ("ssl", c_int, (_P,)),
+    "SSL_version": ("ssl", c_int, (_P,)),
+    "SSL_get_servername": ("ssl", c_char_p, (_P, c_int)),
+    "SSL_get_client_CA_list": ("ssl", _P, (_P,)),
+    "SSL_get_sigalgs": (
+        "ssl",
+        c_int,
+        (_P, c_int, POINTER(c_int), POINTER(c_int), POINTER(c_int), _P, _P),
+    ),
+    "SSL_use_certificate": ("ssl", c_int, (_P, _P)),
+    "SSL_use_PrivateKey": ("ssl", c_int, (_P, _P)),
+    "SSL_ctrl": ("ssl", c_long, (_P, c_int, c_long, _P)),
+    # certificate profile
+    "i2d_X509_NAME": ("crypto", c_int, (_P, _PP)),
+    "X509_get_extended_key_usage": ("crypto", c_uint32, (_P,)),
+    "X509_get_key_usage": ("crypto", c_uint32, (_P,)),
 }
 
 

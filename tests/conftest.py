@@ -71,10 +71,12 @@ class TLSServer:
             raw.settimeout(5)
             try:
                 with self.context.wrap_socket(raw, server_side=True) as tls:
-                    subject = dict(item[0] for item in tls.getpeercert()["subject"])
+                    peer = tls.getpeercert() or {}
+                    subject = dict(item[0] for item in peer.get("subject", ()))
                     name = subject.get("commonName") or ",".join(
                         f"{_SHORT.get(k, k)}={v}" for k, v in subject.items()
                     )
+                    name = name or "-"  # no client certificate
                     tls.sendall(f"{name}\n{tls.version()}".encode())
             except (OSError, ssl.SSLError) as error:
                 self.errors.append(error)
