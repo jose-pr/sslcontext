@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import datetime
 import enum
+import functools
 from dataclasses import dataclass, field
 from typing import Optional, Protocol, Tuple, runtime_checkable
 
-__all__ = ["HASHES", "Identity", "Padding", "Signer"]
+__all__ = ["CertificateInfo", "HASHES", "Identity", "Padding", "Signer"]
 
 HASHES = ("sha1", "sha224", "sha256", "sha384", "sha512")
 """Hash names a signer may be asked to sign for, as :mod:`hashlib` spells them."""
@@ -25,6 +27,10 @@ class Signer(Protocol):
 
     Implemented by every keystore backend, and by anything else that can sign:
     a remote HSM, a cloud KMS, a test key.
+
+    A signer may also have a ``supports_pss`` attribute. When it is
+    ``False`` for an RSA key, :func:`load_identity` keeps the context's own
+    signatures to PKCS#1 v1.5, which limits that identity to TLS 1.2.
     """
 
     def sign(
@@ -50,6 +56,31 @@ class Signer(Protocol):
 
 
 @dataclass(frozen=True)
+class CertificateInfo:
+    """What a certificate says about itself, decoded by OpenSSL."""
+
+    subject: str
+    """RFC 4514 distinguished name, e.g. ``CN=alice,O=Example``."""
+    issuer: str
+    serial: str
+    """Serial number in upper-case hexadecimal."""
+    not_before: datetime.datetime
+    not_after: datetime.datetime
+    """Validity bounds, timezone-aware UTC."""
+    sha1: str
+    """SHA-1 thumbprint of the DER certificate, upper-case hex (Windows' "Thumbprint")."""
+    sha256: str
+    key_type: str
+    """``"rsa"``, ``"ec"`` or ``"other"``."""
+    key_bits: int
+
+    def valid_at(self, when: Optional[datetime.datetime] = None) -> bool:
+        """Whether ``when`` (default: now) lies inside the validity period."""
+        when = when or datetime.datetime.now(datetime.timezone.utc)
+        return self.not_before <= when <= self.not_after
+
+
+@dataclass(frozen=True)
 class Identity:
     """A certificate, its chain, and a signer for its private key.
 
@@ -57,9 +88,9 @@ class Identity:
     from the issuer of ``certificate`` upward and may omit the root.
     """
 
-    certificate: bytes
+    certificate: bytes = field(repr=False)
     signer: Signer = field(repr=False)
-    chain: Tuple[bytes, ...] = ()
+    chain: Tuple[bytes, ...] = field(default=(), repr=False)
     label: str = ""
 
     def __post_init__(self) -> None:
@@ -71,3 +102,11 @@ class Identity:
             raise TypeError("chain must be a tuple of DER bytes")
         if not callable(getattr(self.signer, "sign", None)):
             raise TypeError("signer must have a sign() method")
+
+    @functools.cached_property
+    def info(self) -> CertificateInfo:
+        """The decoded certificate. Raises ``CredentialError`` if it is malformed."""
+        from ._openssl import openssl
+        from ._openssl._objects import certificate_fields
+
+        return CertificateInfo(**certificate_fields(openssl(), self.certificate))

@@ -27,11 +27,18 @@ class TLSServer:
     client certificate's common name and the negotiated protocol version.
     """
 
-    def __init__(self, client_sigalgs: str | None = None) -> None:
+    def __init__(
+        self, client_sigalgs: str | None = None, trust: bytes | None = None
+    ) -> None:
         self.context = ssl.create_default_context(
             ssl.Purpose.CLIENT_AUTH, cafile=str(DATA / "ca.pem")
         )
         self.context.verify_mode = ssl.CERT_REQUIRED
+        if trust is not None:
+            # A self-signed client certificate is its own trust anchor; strict
+            # X.509 checking (on by default from Python 3.13) refuses that.
+            self.context.load_verify_locations(cadata=trust)
+            self.context.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
         self.context.load_cert_chain(DATA / "server.pem", DATA / "server.key")
         if client_sigalgs:
             restrict_client_sigalgs(self.context, client_sigalgs)

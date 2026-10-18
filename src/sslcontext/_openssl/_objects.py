@@ -15,6 +15,7 @@ from ._errors import drain_errors
 
 __all__ = [
     "certificate_der",
+    "certificate_fields",
     "read_certificates",
     "read_pkcs12",
     "read_private_key",
@@ -135,3 +136,70 @@ def certificate_der(lib: OpenSSL, certificate: int) -> bytes:
         return ctypes.string_at(out.value, length)
     finally:
         lib.CRYPTO_free(out.value, b"", 0)
+
+
+# x509.h: XN_FLAG_RFC2253, identical in OpenSSL 1.1.1 and 3.x.
+_XN_FLAG_RFC2253 = 0x1110317
+_BIO_CTRL_INFO = 3
+
+
+def _name_text(lib: OpenSSL, name: int) -> str:
+    bio = lib.BIO_new(lib.BIO_s_mem())
+    try:
+        lib.X509_NAME_print_ex(bio, name, 0, _XN_FLAG_RFC2253)
+        data = ctypes.c_void_p()
+        size = lib.BIO_ctrl(bio, _BIO_CTRL_INFO, 0, ctypes.byref(data))
+        return ctypes.string_at(data.value, size).decode("utf-8", "replace")
+    finally:
+        lib.BIO_free(bio)
+
+
+def _time(lib: OpenSSL, asn1_time: int) -> "datetime.datetime":
+    import datetime
+
+    tm = (ctypes.c_int * 16)()  # struct tm, with room for platform extras
+    if not lib.ASN1_TIME_to_tm(asn1_time, tm):
+        raise CredentialError(f"unreadable certificate date: {drain_errors(lib)}")
+    return datetime.datetime(
+        tm[5] + 1900,
+        tm[4] + 1,
+        tm[3],
+        tm[2],
+        tm[1],
+        tm[0],
+        tzinfo=datetime.timezone.utc,
+    )
+
+
+def certificate_fields(lib: OpenSSL, der: bytes) -> dict:
+    """Subject, issuer, serial, validity and key of a DER certificate."""
+    import hashlib
+
+    (certificate,) = read_certificates(lib, der)
+    try:
+        serial = lib.ASN1_INTEGER_to_BN(lib.X509_get_serialNumber(certificate), None)
+        text = lib.BN_bn2hex(serial)
+        try:
+            serial_hex = ctypes.string_at(text).decode()
+        finally:
+            lib.CRYPTO_free(text, b"", 0)
+            lib.BN_free(serial)
+        public = lib.X509_get_pubkey(certificate)
+        try:
+            kind = {6: "rsa", 408: "ec"}.get(lib.EVP_PKEY_id(public), "other")
+            bits = lib.EVP_PKEY_bits(public)
+        finally:
+            lib.EVP_PKEY_free(public)
+        return {
+            "subject": _name_text(lib, lib.X509_get_subject_name(certificate)),
+            "issuer": _name_text(lib, lib.X509_get_issuer_name(certificate)),
+            "serial": serial_hex,
+            "not_before": _time(lib, lib.X509_get0_notBefore(certificate)),
+            "not_after": _time(lib, lib.X509_get0_notAfter(certificate)),
+            "sha1": hashlib.sha1(der).hexdigest().upper(),
+            "sha256": hashlib.sha256(der).hexdigest().upper(),
+            "key_type": kind,
+            "key_bits": bits,
+        }
+    finally:
+        lib.X509_free(certificate)

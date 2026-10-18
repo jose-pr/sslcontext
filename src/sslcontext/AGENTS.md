@@ -7,8 +7,9 @@ self-contained. Development documentation lives with the source at
 <https://github.com/jose-pr/sslcontext>.
 
 Import everything from the root `sslcontext`, except the errors, which live in
-`sslcontext.exceptions` and are re-exported from the root. Modules whose
-names start with `_` are private.
+`sslcontext.exceptions` and are re-exported from the root, the keystore
+backends (`sslcontext.backends`) and the test helpers (`sslcontext.testing`).
+Modules whose names start with `_` are private.
 
 `pip install sslcontext`. No runtime dependencies.
 
@@ -109,7 +110,28 @@ class Identity:
 ```
 
 `Identity` raises `TypeError` when `certificate`/`chain` are not DER bytes
-or `signer` has no `sign` method.
+or `signer` has no `sign` method. `identity.info` (cached) decodes the
+certificate into a `CertificateInfo`:
+
+```python
+@dataclass(frozen=True)
+class CertificateInfo:
+    subject: str        # RFC 4514, e.g. "CN=alice,O=Example"
+    issuer: str
+    serial: str         # upper-case hex
+    not_before: datetime.datetime   # UTC, timezone-aware
+    not_after: datetime.datetime
+    sha1: str           # upper-case hex; Windows' "Thumbprint"
+    sha256: str
+    key_type: str       # "rsa", "ec" or "other"
+    key_bits: int
+    def valid_at(self, when: datetime.datetime | None = None) -> bool
+```
+
+A signer may carry `supports_pss: bool`. When it is `False` on an RSA
+identity, `load_identity` restricts the context's own signatures to PKCS#1
+v1.5 RSA and ECDSA (`SSL_CTX_set1_client_sigalgs_list`), so that identity
+can only complete TLS 1.2.
 
 ```python
 def load_identity(context: ssl.SSLContext, identity: Identity) -> None
@@ -121,6 +143,67 @@ The signer is kept alive until `context` is garbage-collected. Raises
 `CredentialError` (malformed certificate), `UnsupportedOpenSSLError`
 (interpreter's OpenSSL cannot host the signer), `TypeError`. Works on
 OpenSSL 1.1.1 and 3.x.
+
+## Keystores (`sslcontext.backends`)
+
+```python
+class Backend(ABC):
+    name: ClassVar[str]
+    def identities(self) -> Iterator[Identity]          # abstract
+    def find_identities(self, *, thumbprint=None, subject=None, issuer=None,
+                        label=None, valid=True) -> list[Identity]
+    def find_identity(self, **query) -> Identity
+    def close(self) -> None
+    # context manager: `with backend: ...`
+```
+
+A backend's constructor does no I/O. `identities()` yields every entry whose
+private key is usable; it raises `KeystoreError` when the keystore cannot be
+read. `find_identities` keeps entries matching every criterion given, newest
+expiry first: `thumbprint` is SHA-1 or SHA-256 hex (case, spaces, colons
+ignored); `subject`/`issuer` match a case-insensitive substring of the RFC
+4514 name; `label` equals the keystore's own entry name (case-insensitive);
+`valid=True` keeps only certificates valid now. `find_identity` returns the
+first of those (the renewed certificate wins) or raises
+`IdentityNotFoundError`. Identities stay usable after the backend is closed.
+
+```python
+def names() -> list[str]
+def get(name: str) -> type[Backend]          # ValueError naming registered ones
+def register_backend(name: str, backend: type[Backend] | str) -> None
+```
+
+Third-party backends register under the entry-point group
+`sslcontext.backends` (`name = "module:Class"`). Names are lower case; a
+taken name raises `ValueError`.
+
+| Name | Class | Keystore |
+| --- | --- | --- |
+| `cng` | `CNGBackend` | Windows certificate stores; keys in CNG providers (software, TPM, smart cards and virtual smart cards via minidrivers) or legacy CryptoAPI CSPs |
+
+```python
+class CNGBackend(Backend):
+    def __init__(self, store: str = "MY", location: str = "current_user", *,
+                 pin: str | None = None, silent: bool = False)
+```
+
+`store` is a system store name (`"MY"` = Personal). `location` is
+`"current_user"` or `"local_machine"` (else `ValueError`). `pin` is set on
+smart-card keys instead of showing Windows' PIN dialog; `silent=True` makes a
+key that needs a dialog fail instead. `label` is the certificate's Windows
+friendly name. The chain is what Windows can build from its stores without
+network access, root excluded. A key that only a legacy CryptoAPI CSP can use
+has `signer.supports_pss == False` (TLS 1.2 only); legacy *software* CSP keys
+open through CNG and support TLS 1.3. On a non-Windows system, `identities()`
+raises `KeystoreError` (`errno.ENOSYS`).
+
+```python
+import sslcontext
+from sslcontext.backends import CNGBackend
+
+ctx = sslcontext.create_context()
+sslcontext.load_identity(ctx, CNGBackend().find_identity(subject="alice"))
+```
 
 ## Test helpers (`sslcontext.testing`)
 
@@ -157,6 +240,9 @@ All in `sslcontext.exceptions`, re-exported from the root.
 - `sslcontext` drives the OpenSSL that the running interpreter's `ssl` module
   loaded, through ctypes. It does not work with LibreSSL (Apple's
   `/usr/bin/python3`) and needs OpenSSL 1.1.1 or later.
+- Smart-card PIN dialogs and other keystore prompts happen inside the TLS
+  handshake, on the thread doing it; in asyncio that blocks the event loop.
+  Pass `pin=` or do the first handshake off the loop.
 - `SSL_CTX_check_private_key` compares public keys only, so an `Identity`
   whose signer holds a different private key than the certificate loads
   fine and fails at the peer, which rejects the signature.

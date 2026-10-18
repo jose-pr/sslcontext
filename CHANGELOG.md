@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   private key is used only through a signer, for every handshake signature
   (RSA PKCS#1 v1.5 and PSS, ECDSA; TLS 1.2 and 1.3). OpenSSL 1.1.1 and 3.x.
 - `sslcontext.testing.SoftwareSigner` and `software_identity()`.
+- `Identity.info` (`CertificateInfo`: subject, issuer, serial, validity,
+  SHA-1/SHA-256 thumbprints, key type and size).
+- `sslcontext.backends`: the `Backend` contract with thumbprint, subject,
+  issuer, label and validity queries, a registry (`names()`, `get()`,
+  `register_backend()`, entry-point group `sslcontext.backends`), and
+  `CNGBackend` for Windows certificate stores: non-exportable, TPM and
+  smart-card keys through CNG, and legacy CryptoAPI CSP keys (PKCS#1 v1.5,
+  TLS 1.2).
 
 ### Changed
 

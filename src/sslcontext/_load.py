@@ -21,6 +21,11 @@ BytesOrText = Union[bytes, bytearray, memoryview, str]
 
 _SSL_CTRL_CHAIN = 88
 _SSL_CTRL_CHAIN_CERT = 89
+_SSL_CTRL_SET_CLIENT_SIGALGS_LIST = 102
+# Client-authentication signatures a PKCS#1-only RSA key can still make.
+_NO_PSS_SIGALGS = (
+    b"RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA256:ECDSA+SHA384:ECDSA+SHA512"
+)
 
 
 def _as_bytes(value: BytesOrText, name: str) -> bytes:
@@ -156,6 +161,10 @@ def load_identity(context: ssl.SSLContext, identity: Identity) -> None:
                 install(lib, context, certificates[0], certificates[1:], key)
             finally:
                 lib.EVP_PKEY_free(key)
+            if record.key_type == "rsa" and not getattr(
+                identity.signer, "supports_pss", True
+            ):
+                _sign_without_pss(lib, context)
         except BaseException:
             _keys.forget(lib, handle)
             raise
@@ -163,3 +172,18 @@ def load_identity(context: ssl.SSLContext, identity: Identity) -> None:
     finally:
         for pointer in certificates:
             lib.X509_free(pointer)
+
+
+def _sign_without_pss(lib: OpenSSL, context: ssl.SSLContext) -> None:
+    """Keep the context's own signatures to PKCS#1 v1.5 RSA and ECDSA.
+
+    TLS 1.3 needs RSA-PSS, so an RSA identity restricted this way is limited
+    to TLS 1.2 peers.
+    """
+    pointer = ssl_ctx_pointer(lib, context)
+    if not lib.SSL_CTX_ctrl(
+        pointer, _SSL_CTRL_SET_CLIENT_SIGALGS_LIST, 0, _NO_PSS_SIGALGS
+    ):
+        raise CredentialError(
+            f"cannot restrict signature algorithms: {drain_errors(lib)}"
+        )

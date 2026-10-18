@@ -22,6 +22,12 @@ compiled extension. Documentation: <https://jose-pr.github.io/sslcontext/>.
 - **One context builder** — `create_context()` for the verify/cafile/capath
   combinations every HTTP client reimplements.
 
+### Keystores
+
+| Backend | Platform | Keys | Extra |
+| --- | --- | --- | --- |
+| `cng` | Windows | certificate stores: software (incl. non-exportable), TPM, smart cards and virtual smart cards, legacy CryptoAPI CSPs | none |
+
 ## Installation
 
 ```bash
@@ -30,6 +36,8 @@ pip install sslcontext
 
 ## Quick start
 
+Load a certificate and key held in memory:
+
 ```python
 import sslcontext
 
@@ -37,11 +45,25 @@ ctx = sslcontext.create_context(cafile="ca.pem")
 sslcontext.load_pem(ctx, certificate=cert_pem, key=key_pem)
 ```
 
+Use a certificate from the Windows store whose key cannot be exported:
+
+```python
+import urllib.request
+import sslcontext
+from sslcontext.backends import CNGBackend
+
+ctx = sslcontext.create_context()
+sslcontext.load_identity(ctx, CNGBackend().find_identity(subject="alice"))
+urllib.request.urlopen("https://mtls.example.com/", context=ctx)
+```
+
 ## API overview
 
 | Module | Purpose |
 | --- | --- |
 | `sslcontext` | context builder, identity loading, the `Signer` contract |
+| `sslcontext.backends` | keystore backends and their registry |
+| `sslcontext.testing` | `SoftwareSigner`, an in-memory signer for tests |
 | `sslcontext.exceptions` | the package's errors |
 
 ## Development

@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 from ._context import VerifyLike, create_context
-from ._identity import HASHES, Identity, Padding, Signer
+from ._identity import HASHES, CertificateInfo, Identity, Padding, Signer
 from ._load import BytesOrText, load_identity, load_pem, load_pkcs12
 from .exceptions import (
     CredentialError,
@@ -23,6 +23,7 @@ except PackageNotFoundError:  # running from a checkout without an install
 
 __all__ = [
     "BytesOrText",
+    "CertificateInfo",
     "CredentialError",
     "HASHES",
     "Identity",
