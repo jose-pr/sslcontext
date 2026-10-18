@@ -32,7 +32,10 @@ class TLSServer:
     """
 
     def __init__(
-        self, client_sigalgs: str | None = None, trust: bytes | None = None
+        self,
+        client_sigalgs: str | None = None,
+        trust: bytes | None = None,
+        certificate: object = None,
     ) -> None:
         self.context = ssl.create_default_context(
             ssl.Purpose.CLIENT_AUTH, cafile=str(DATA / "ca.pem")
@@ -43,7 +46,10 @@ class TLSServer:
             # X.509 checking (on by default from Python 3.13) refuses that.
             self.context.load_verify_locations(cadata=trust)
             self.context.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
-        self.context.load_cert_chain(DATA / "server.pem", DATA / "server.key")
+        if certificate is None:
+            self.context.load_cert_chain(DATA / "server.pem", DATA / "server.key")
+        else:  # an sslcontext.issuing.IssuedCertificate
+            certificate.load_into(self.context)
         if client_sigalgs:
             restrict_client_sigalgs(self.context, client_sigalgs)
         self.errors: list[BaseException] = []
@@ -119,3 +125,13 @@ def tls_server() -> Iterator[TLSServer]:
 def client_context() -> ssl.SSLContext:
     """A client context trusting the test CA and holding no identity yet."""
     return ssl.create_default_context(cafile=str(DATA / "ca.pem"))
+
+
+@pytest.fixture(scope="session")
+def short_lived_server():
+    """``(ca_pem, issued)``: a server certificate for ``localhost`` that an OS
+    verifier accepts (macOS refuses the long-lived one in ``tests/data``)."""
+    from sslcontext.issuing import CertificateAuthority
+
+    ca = CertificateAuthority.create("sslcontext test server CA")
+    return ca.certificate, ca.issue(["localhost"], days=30)

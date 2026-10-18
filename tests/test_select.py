@@ -219,12 +219,17 @@ def test_concurrent_handshakes_each_get_their_answer(
     assert names == ["client-rsa", "client-b"] * 8
 
 
-def test_a_truststore_context_answers_too(ca_b, identity_b, tmp_path):
+def test_a_truststore_context_answers_too(
+    ca_b, identity_b, tmp_path, short_lived_server
+):
     truststore = pytest.importorskip("truststore")
+    ca_pem, issued = short_lived_server
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.load_verify_locations(cafile=str(DATA / "ca.pem"))
+    context.load_verify_locations(cadata=ca_pem.decode())
     ClientCertificateSelector([identity_b]).install(context)
-    with server(ca_b, ca_b.certificate, tmp_path=tmp_path) as only_b:
+    only_b = TLSServer(trust=ca_b.certificate.decode(), certificate=issued)
+    announce(only_b, ca_b.certificate, tmp_path=tmp_path)
+    with only_b:
         assert only_b.handshake(context).client_cn == "client-b"
 
 

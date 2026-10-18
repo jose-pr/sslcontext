@@ -118,7 +118,7 @@ def test_identity_rejects_wrong_types():
 
 def test_the_interpreter_exits_cleanly_after_signing():
     """OpenSSL's exit-time cleanup must never call back into Python."""
-    script = textwrap.dedent(f"""
+    source = f"""
         import ssl, sys
         sys.path.insert(0, {str(DATA.parent)!r})
         import sslcontext
@@ -144,7 +144,8 @@ def test_the_interpreter_exits_cleanly_after_signing():
             bios[0].write(bios[3].read())
         assert s.getpeercert()["subject"][0][0][1] == "client-rsa"
         print("ok")
-        """)
+        """
+    script = textwrap.dedent(source)
     result = subprocess.run(
         [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
     )

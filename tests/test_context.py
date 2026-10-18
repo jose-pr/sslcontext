@@ -95,9 +95,13 @@ def test_an_identity_reaches_the_context_a_wrapper_hands_shakes_to(tls_server):
     assert tls_server.handshake(wrapper).client_cn == "client-rsa"
 
 
-def test_a_real_truststore_context_sends_the_loaded_identity(tls_server):
+def test_a_real_truststore_context_sends_the_loaded_identity(short_lived_server):
     truststore = pytest.importorskip("truststore")
+    from conftest import TLSServer
+
+    ca_pem, issued = short_lived_server
     context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    context.load_verify_locations(cafile=str(DATA / "ca.pem"))
+    context.load_verify_locations(cadata=ca_pem.decode())
     sslcontext.load_pem(context, data("client-ec.pem"), data("client-ec.key"))
-    assert tls_server.handshake(context).client_cn == "client-ec"
+    with TLSServer(certificate=issued) as server:
+        assert server.handshake(context).client_cn == "client-ec"
