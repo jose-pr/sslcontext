@@ -12,7 +12,8 @@ backends (`sslcontext.backends`) and the test helpers (`sslcontext.testing`).
 Modules whose names start with `_` are private.
 
 `pip install sslcontext`. No runtime dependencies; the extra `system` adds
-`truststore` (Python 3.10+) for `system_context()`'s OS verification.
+`truststore` (Python 3.10+) for `system_context()`'s OS verification; the
+extra `cli` adds the `sslcontext` command (duho).
 
 `sslcontext.__version__` is the installed distribution's version.
 
@@ -468,6 +469,32 @@ hour ago, so strict verification (the default from Python 3.13) accepts it;
 `ValueError` for no names. `private_key_pem(password)` exports the CA key,
 AES-256 encrypted when a password is given; store it as a secret. The CA
 key lives in memory; keystore-held CA keys are not supported.
+
+## Command line (`sslcontext`, extra `cli`)
+
+```
+sslcontext list  [SOURCE] [--all] [--json]
+sslcontext show  [SOURCE] QUERY
+sslcontext probe [SOURCE] URL [--cafile F] [-k] [--ask] [--no-policy] [--timeout S] [--json]
+SOURCE: [-b system|cng|pkcs11|<registered>] [--store MY] [--location current_user|local_machine]
+        [--module PATH] [--token LABEL] [--pin none|ask|keystore]
+```
+
+`list` prints the identities whose key is usable (valid ones unless
+`--all`): SHA-1, expiry, key, `client`/`no-client` (whether a browser would
+offer it for client authentication), subject, issuer. `show` prints one in
+full as JSON, by SHA-1/SHA-256 (case, spaces, colons ignored) or a subject
+substring; none matching exits 1. `probe` connects with `system_context()`
+over the chosen sources (`https://host[:port]/path` also sends `HEAD` and
+prints the status line; `host[:port]` is TLS only) and reports the server's
+certificate, each certificate request (accepted issuers, the candidates,
+what was sent); a failed connection is reported and exits 1. `--ask` picks
+on the terminal when several fit; `--pin ask` reads a PIN with `getpass`
+(never for listing), `--pin keystore` uses `KEYSTORE_PROMPT`; the default
+never waits. `-b system` is `system_sources()`. Exit codes: 0 done, 1 failed
+(or the extra is missing), 2 wrong invocation (an unknown backend, a scheme
+other than `https`). `sslcontext.cli.main(argv=None) -> int` runs it in
+process; importing `sslcontext.cli` needs no duho.
 
 ## Test helpers (`sslcontext.testing`)
 

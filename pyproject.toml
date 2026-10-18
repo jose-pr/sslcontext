@@ -25,8 +25,13 @@ dependencies = []
 [project.optional-dependencies]
 # system_context(): the operating system verifies servers (truststore needs 3.10).
 system = ['truststore>=0.10,<0.11; python_version >= "3.10"']
-dev = ["black", "build", "pytest", "sslcontext[system]"]
+# The sslcontext command; only sslcontext.cli imports duho.
+cli = ["duho>=0.7.4,<0.8"]
+dev = ["black", "build", "pytest", "sslcontext[system,cli]"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
+
+[project.scripts]
+sslcontext = "sslcontext.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jose-pr/sslcontext/"

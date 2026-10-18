@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- The `sslcontext` command (extra `cli`): `list` and `show` keystore
+  identities, `probe URL` to see a server's certificate request, the
+  candidates and the certificate sent.
 - `system_context()`: a client context that behaves like the system's
   browser: OS verification through truststore (extra `system`) and
   client certificates chosen when the server asks by a

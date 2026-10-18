@@ -106,6 +106,13 @@ sslcontext.load_identity(ctx, card.find_identity(subject="alice"))
 | `sslcontext.testing` | `SoftwareSigner`, an in-memory signer for tests |
 | `sslcontext.exceptions` | the package's errors |
 
+## Command line
+
+`pip install "sslcontext[cli]"` adds `sslcontext`: `sslcontext list` shows the
+client certificates the system's keystores hold, and `sslcontext probe
+https://intranet.example/` shows what a server asks for and which
+certificate answers it.
+
 ## Development
 
 ```bash
