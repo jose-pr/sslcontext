@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import ssl
+import weakref
 from typing import Sequence, Union
 
+from ._identity import Identity
 from ._openssl import OpenSSL, openssl, ssl_ctx_pointer
+from ._openssl import _keys
 from ._openssl._errors import drain_errors
 from ._openssl._objects import read_certificates, read_pkcs12, read_private_key
+from ._openssl._signing import make_private_key
 from .exceptions import CredentialError
 
-__all__ = ["BytesOrText", "load_pem", "load_pkcs12"]
+__all__ = ["BytesOrText", "load_identity", "load_pem", "load_pkcs12"]
 
 BytesOrText = Union[bytes, bytearray, memoryview, str]
 """PEM text as ``str``, or bytes holding PEM or DER."""
@@ -119,4 +123,43 @@ def load_pkcs12(
         lib.EVP_PKEY_free(key)
         lib.X509_free(certificate)
         for pointer in chain:
+            lib.X509_free(pointer)
+
+
+def load_identity(context: ssl.SSLContext, identity: Identity) -> None:
+    """Make a keystore :class:`Identity` the context's certificate and key.
+
+    The private key stays wherever ``identity.signer`` keeps it: OpenSSL asks
+    the signer for each handshake signature. The signer is held until
+    ``context`` is garbage-collected.
+
+    Raises :class:`CredentialError` for a malformed certificate,
+    :class:`UnsupportedOpenSSLError` when the interpreter's OpenSSL cannot
+    host the signer, and ``TypeError`` for arguments of the wrong type.
+    """
+    if not isinstance(identity, Identity):
+        raise TypeError(f"expected Identity, got {type(identity).__name__}")
+    lib = openssl()
+    ssl_ctx_pointer(lib, context)  # type check before anything is allocated
+    certificates = read_certificates(lib, identity.certificate)
+    try:
+        for link in identity.chain:
+            certificates.extend(read_certificates(lib, link))
+        public = lib.X509_get_pubkey(certificates[0])
+        if not public:
+            raise CredentialError(f"certificate has no public key: {drain_errors(lib)}")
+        handle = _keys.remember(lib, identity.signer, public, identity.label)
+        try:
+            record = _keys.lookup(handle)
+            key = make_private_key(lib, handle, record.key_type)
+            try:
+                install(lib, context, certificates[0], certificates[1:], key)
+            finally:
+                lib.EVP_PKEY_free(key)
+        except BaseException:
+            _keys.forget(lib, handle)
+            raise
+        weakref.finalize(context, _keys.forget, lib, handle)
+    finally:
+        for pointer in certificates:
             lib.X509_free(pointer)

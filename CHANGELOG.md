@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `create_context()` builds a verifying `ssl.SSLContext` from
+  `verify`/`cafile`/`capath`/`cadata`, TLS version bounds and ALPN.
+- `load_pem()` and `load_pkcs12()` load a certificate, chain and key from
+  memory, with no temporary files.
+- `Identity`, the `Signer` protocol and `load_identity()`: a certificate whose
+  private key is used only through a signer, for every handshake signature
+  (RSA PKCS#1 v1.5 and PSS, ECDSA; TLS 1.2 and 1.3). Requires OpenSSL 3.
+- `sslcontext.testing.SoftwareSigner` and `software_identity()`.
+
 ### Changed
 
 - Rewritten from scratch. `sslcontext` now loads certificates and keystore-held

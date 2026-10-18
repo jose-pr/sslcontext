@@ -27,12 +27,14 @@ class TLSServer:
     client certificate's common name and the negotiated protocol version.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, client_sigalgs: str | None = None) -> None:
         self.context = ssl.create_default_context(
             ssl.Purpose.CLIENT_AUTH, cafile=str(DATA / "ca.pem")
         )
         self.context.verify_mode = ssl.CERT_REQUIRED
         self.context.load_cert_chain(DATA / "server.pem", DATA / "server.key")
+        if client_sigalgs:
+            restrict_client_sigalgs(self.context, client_sigalgs)
         self.errors: list[BaseException] = []
         self._listener = socket.create_server(("127.0.0.1", 0))
         self._listener.settimeout(0.2)
@@ -76,6 +78,19 @@ class TLSServer:
                     reply += chunk
         cn, version = reply.decode().split("\n")
         return Handshake(cn, version)
+
+
+def restrict_client_sigalgs(context: ssl.SSLContext, sigalgs: str) -> None:
+    """Limit the signature algorithms a server accepts from client certificates.
+
+    The stdlib has no API for it; this reaches OpenSSL directly
+    (SSL_CTX_set1_client_sigalgs_list).
+    """
+    from sslcontext._openssl import openssl, ssl_ctx_pointer
+
+    lib = openssl()
+    ok = lib.SSL_CTX_ctrl(ssl_ctx_pointer(lib, context), 102, 0, sigalgs.encode())
+    assert ok == 1, sigalgs
 
 
 @pytest.fixture

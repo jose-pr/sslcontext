@@ -58,12 +58,42 @@ _SIGNATURES: dict[str, tuple[str, Any, tuple[Any, ...]]] = {
     "EVP_PKEY_id": ("crypto", c_int, (_P,)),
     "EVP_PKEY_bits": ("crypto", c_int, (_P,)),
     "EVP_PKEY_size": ("crypto", c_int, (_P,)),
+    "EVP_PKEY_eq": ("crypto", c_int, (_P, _P)),
+    "EVP_PKEY_get_params": ("crypto", c_int, (_P, _P)),
+    "EVP_PKEY_todata": ("crypto", c_int, (_P, c_int, _PP)),
+    "OSSL_PARAM_free": ("crypto", None, (_P,)),
+    # signing with an ordinary key (sslcontext.testing)
+    "EVP_get_digestbyname": ("crypto", _P, (c_char_p,)),
+    "EVP_PKEY_CTX_new": ("crypto", _P, (_P, _P)),
+    "EVP_PKEY_CTX_free": ("crypto", None, (_P,)),
+    "EVP_PKEY_CTX_ctrl": ("crypto", c_int, (_P, c_int, c_int, c_int, c_int, _P)),
+    "EVP_PKEY_sign_init": ("crypto", c_int, (_P,)),
+    "EVP_PKEY_sign": (
+        "crypto",
+        c_int,
+        (_P, c_char_p, POINTER(c_size_t), c_char_p, c_size_t),
+    ),
+    # providers (OpenSSL 3)
+    "OSSL_PROVIDER_available": ("crypto", c_int, (_P, c_char_p)),
+    "OSSL_PROVIDER_add_builtin": ("crypto", c_int, (_P, c_char_p, _P)),
+    "OSSL_PROVIDER_load": ("crypto", _P, (_P, c_char_p)),
+    "EVP_PKEY_CTX_new_from_name": ("crypto", _P, (_P, c_char_p, c_char_p)),
+    "EVP_PKEY_fromdata_init": ("crypto", c_int, (_P,)),
+    "EVP_PKEY_fromdata": ("crypto", c_int, (_P, _PP, c_int, _P)),
     # contexts
     "SSL_CTX_get_verify_mode": ("ssl", c_int, (_P,)),
     "SSL_CTX_use_certificate": ("ssl", c_int, (_P, _P)),
     "SSL_CTX_use_PrivateKey": ("ssl", c_int, (_P, _P)),
     "SSL_CTX_check_private_key": ("ssl", c_int, (_P,)),
     "SSL_CTX_ctrl": ("ssl", c_long, (_P, c_int, c_long, _P)),
+}
+
+
+# OpenSSL 3 exports these under new names; the old ones are macros there.
+_V3_SYMBOLS = {
+    "EVP_PKEY_id": "EVP_PKEY_get_id",
+    "EVP_PKEY_bits": "EVP_PKEY_get_bits",
+    "EVP_PKEY_size": "EVP_PKEY_get_size",
 }
 
 
@@ -85,7 +115,8 @@ class OpenSSL:
             library, restype, argtypes = _SIGNATURES[name]
         except KeyError:
             raise AttributeError(f"{name} is not declared in _SIGNATURES") from None
-        function = getattr(self.libssl if library == "ssl" else self.libcrypto, name)
+        symbol = _V3_SYMBOLS.get(name, name) if self.is_v3 else name
+        function = getattr(self.libssl if library == "ssl" else self.libcrypto, symbol)
         function.restype = restype
         function.argtypes = list(argtypes)
         setattr(self, name, function)
