@@ -8,9 +8,9 @@
 
 **Client certificates whose private keys never leave the OS keystore, in a
 plain `ssl.SSLContext`.** `sslcontext` signs TLS handshakes through Windows
-CNG or a PKCS#11 token (smart cards included), so every library that accepts
-an `ssl_context` gets mutual TLS with no patching, no temporary key files and
-no compiled extension; `system_context()` also picks the certificate as the
+CNG, the macOS Keychain or a PKCS#11 token (smart cards included), so every
+library that accepts an `ssl_context` gets mutual TLS with no patching, no
+temporary key files and no compiled extension; `system_context()` also picks the certificate as the
 browser would. Documentation: <https://jose-pr.github.io/sslcontext/>.
 
 ## Features

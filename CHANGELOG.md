@@ -12,6 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `sslcontext` command (extra `cli`): `list` and `show` keystore
   identities, `probe URL` to see a server's certificate request, the
   candidates and the certificate sent.
+- `KeychainBackend` (`sslcontext.backends`, name `keychain`): identities in
+  the macOS Keychain and on smart cards, signed silently or, with
+  `KEYSTORE_PROMPT`, after macOS's own dialog. `system_sources()` uses it on
+  macOS.
+- On Python 3.9, where truststore is unavailable, `system_context()` on macOS
+  trusts the Keychain's anchors (system roots, and those an administrator or
+  the user trusted) in addition to OpenSSL's default store.
 - `create_context()` and `system_context()` take `ca=`, `certificate=`,
   `key=`, `password=` and `identity=`. Every certificate, key, CA and
   bundle argument (including `load_pem()` and `load_pkcs12()`) accepts PEM

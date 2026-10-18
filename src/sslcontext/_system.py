@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import ssl
 import sys
@@ -18,20 +19,27 @@ if TYPE_CHECKING:
 
 __all__ = ["system_context", "system_selector", "system_sources"]
 
+_log = logging.getLogger("sslcontext")
+
 
 def system_sources(*, pin: PinSource = None) -> List["Backend"]:
     """The keystores a browser on this system offers client certificates from.
 
     Windows: the user's Personal store (``CNGBackend("MY")``), which also
-    holds the certificates of inserted smart cards. Elsewhere: the PKCS#11
-    module :class:`~sslcontext.backends.PKCS11Backend` would load by default
-    (p11-kit's proxy on Linux, every token the system configured), when one
-    is installed. ``pin`` is given to each backend. Nothing is opened here.
+    holds the certificates of inserted smart cards. macOS: the Keychain
+    (``KeychainBackend()``: the user's keychains and smart cards). Elsewhere:
+    the PKCS#11 module :class:`~sslcontext.backends.PKCS11Backend` would load
+    by default (p11-kit's proxy on Linux, every token the system configured),
+    when one is installed. ``pin`` is given to each backend. Nothing is opened here.
     """
     if sys.platform == "win32":
         from .backends import CNGBackend
 
         return [CNGBackend("MY", "current_user", pin=pin)]
+    if sys.platform == "darwin":
+        from .backends import KeychainBackend
+
+        return [KeychainBackend(pin=pin)]
     from .backends import PKCS11Backend
     from .backends._pkcs11 import default_module
 
@@ -59,6 +67,23 @@ def system_selector(
         remember=remember,
         cache_ttl=cache_ttl,
     )
+
+
+def _load_macos_anchors(context: ssl.SSLContext) -> None:
+    # Without truststore (Python 3.9) OpenSSL's default store is all there is,
+    # which misses roots an administrator or the user added to the Keychain.
+    from .backends._macos import anchor_certificates
+
+    try:
+        anchors = anchor_certificates()
+    except OSError as error:
+        _log.debug("sslcontext: the Keychain's trust anchors are unreadable: %s", error)
+        return
+    for der in anchors:
+        try:
+            context.load_verify_locations(cadata=der)
+        except ssl.SSLError:  # one the TLS library cannot parse
+            continue
 
 
 def _truststore() -> Optional[type]:
@@ -146,6 +171,8 @@ def system_context(
             maximum_version=maximum_version,
             alpn=alpn,
         )
+        if not custom_trust and sys.platform == "darwin":
+            _load_macos_anchors(context)
     if ssl.HAS_TLSv1_3:  # read-only on a TLS library without it (LibreSSL 2.x)
         context.post_handshake_auth = True
     if selector is None:

@@ -98,6 +98,8 @@ def system_sources(*, pin: PinSource = None) -> list[Backend]
 browser. Servers are verified by the operating system (a
 `truststore.SSLContext`: CryptoAPI on Windows, the Security framework on
 macOS) on Python 3.10+, and by OpenSSL over the default store on 3.9
+(on macOS with the Keychain's trust anchors added: the system roots and
+those an administrator or the user trusted, none marked "deny")
 (truststore needs 3.10); `verify`/`ca`/`cafile`/`capath`/`cadata` replace
 that trust exactly as for `create_context`. When a server asks for a client
 certificate, `selector` answers (default `system_selector(pin=pin)`;
@@ -108,9 +110,10 @@ one of your own to have both).
 `post_handshake_auth` is on. Nothing is opened until a server asks; one
 context serves every server and every thread, so share it (urllib3 keys its
 pools by context). `system_sources()`: Windows `CNGBackend("MY")` (smart-card
-certificates appear there while the card is inserted); elsewhere
+certificates appear there while the card is inserted); macOS
+`KeychainBackend()` (the user's keychains and smart cards); elsewhere
 `PKCS11Backend()` when its default module exists (p11-kit's proxy on Linux),
-else `[]`. macOS has no Keychain source yet.
+else `[]`.
 
 ```python
 class ClientCertificateSelector:
@@ -394,6 +397,7 @@ taken name raises `ValueError`.
 | --- | --- | --- |
 | `cng` | `CNGBackend` | Windows certificate stores; keys in CNG providers (software, TPM, smart cards and virtual smart cards via minidrivers) or legacy CryptoAPI CSPs |
 | `pkcs11` | `PKCS11Backend` | PKCS#11 tokens: smart cards (real or virtual) through OpenSC, HSMs, TPMs (tpm2-pkcs11), SoftHSM; any OS |
+| `keychain` | `KeychainBackend` | the macOS Keychain: the user's keychains, and smart cards through CryptoTokenKit |
 
 ```python
 class CNGBackend(Backend):
@@ -468,6 +472,32 @@ from sslcontext.backends import PKCS11Backend
 backend = PKCS11Backend("/usr/lib64/pkcs11/opensc-pkcs11.so",
                         pin=lambda request: getpass(f"PIN for {request.token}: "))
 sslcontext.load_identity(ctx, backend.find_identity(label="Certificate for PIV Authentication"))
+```
+
+```python
+class KeychainBackend(Backend):
+    def __init__(self, keychain: str | os.PathLike | None = None, *,
+                 pin: PinSource = None)
+```
+
+Searches the user's keychain search list (login, System) and the
+identities smart cards expose (CryptoTokenKit), or only the keychain file
+`keychain` (it must exist and be unlocked; missing: `KeystoreError`,
+`errno.ENOENT`). `label` is the certificate's subject summary (usually its
+common name); the chain is what macOS builds without network access, root
+excluded. Signing goes through `SecKeyCreateSignature` (RSA PKCS#1 v1.5 and
+PSS, the salt as long as the digest; ECDSA), silently first: only when macOS
+reports that the key needs the user (`errSecInteractionNotAllowed`: an
+access prompt, a smart-card PIN, Touch ID) is `pin` consulted
+(`purpose="sign"`): `KEYSTORE_PROMPT` retries with macOS's own dialog
+allowed; anything else fails at once with `KeystoreError` (`errno.EACCES`),
+since a PIN value cannot be handed to the Keychain. On another system,
+`identities()` raises `KeystoreError` (`errno.ENOSYS`).
+
+```python
+from sslcontext.backends import KeychainBackend
+
+sslcontext.load_identity(ctx, KeychainBackend().find_identity(subject="alice"))
 ```
 
 ## Issuing certificates (`sslcontext.issuing`)

@@ -2,11 +2,12 @@
 
 **Client certificates whose private keys never leave the OS keystore, in a
 plain `ssl.SSLContext`.** `sslcontext` signs TLS handshakes through Windows
-CNG or a PKCS#11 token (smart cards included), so every library that takes an
-`ssl_context` gets mutual TLS with no patching, no temporary key files and no
-compiled extension. It drives the OpenSSL your Python already loaded, through
-ctypes, on OpenSSL 1.1.1 and 3.x. Nothing ever waits for a PIN unless you say
-how one is given.
+CNG, the macOS Keychain or a PKCS#11 token (smart cards included), so every
+library that takes an `ssl_context` gets mutual TLS with no patching, no
+temporary key files and no compiled extension. It drives the TLS library your
+Python already loaded, through ctypes: OpenSSL 1.1.1 and 3.x, and the
+LibreSSL of Apple's bundled Python. Nothing ever waits for a PIN unless you
+say how one is given.
 
 ## Installation
 
