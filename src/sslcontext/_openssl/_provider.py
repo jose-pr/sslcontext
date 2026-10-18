@@ -33,6 +33,14 @@ from ..exceptions import UnsupportedOpenSSLError
 from . import _keys
 from ._api import OpenSSL
 from ._errors import drain_errors
+from ._signing import (
+    SALT_AUTO,
+    SALT_AUTO_DIGEST_MAX,
+    SALT_DIGEST,
+    SALT_MAX,
+    hash_name,
+    salt_length,
+)
 from ._params import (
     OSSL_PARAM,
     PARAM_INTEGER,
@@ -70,12 +78,11 @@ _SELECT_PRIVATE_KEY, _SELECT_PUBLIC_KEY = 0x01, 0x02
 _EVP_PKEY_KEYPAIR = 0x87
 # rsa.h padding modes and PSS salt-length specials
 _RSA_PKCS1_PADDING, _RSA_PKCS1_PSS_PADDING = 1, 6
-_SALT_DIGEST, _SALT_AUTO, _SALT_MAX, _SALT_AUTO_DIGEST_MAX = -1, -2, -3, -4
 _SALT_NAMES = {
-    "digest": _SALT_DIGEST,
-    "auto": _SALT_AUTO,
-    "max": _SALT_MAX,
-    "auto-digestmax": _SALT_AUTO_DIGEST_MAX,
+    "digest": SALT_DIGEST,
+    "auto": SALT_AUTO,
+    "max": SALT_MAX,
+    "auto-digestmax": SALT_AUTO_DIGEST_MAX,
 }
 
 
@@ -119,20 +126,12 @@ def _guard(failure: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     return decorate
 
 
-def _hash_name(name: str) -> str:
-    """OpenSSL's digest names (``SHA2-256``, ``SHA256``, ``sha256``) as hashlib's."""
-    normal = name.upper().replace("SHA2-", "SHA").replace("SHA-", "SHA")
-    if not normal.startswith("SHA") or not normal[3:].isdigit():
-        raise ValueError(f"unsupported digest {name!r}")
-    return normal.lower()
-
-
 @dataclass
 class _SignContext:
     handle: int = 0
     hash: str | None = None
     padding: int = _RSA_PKCS1_PADDING
-    salt: int = _SALT_AUTO_DIGEST_MAX
+    salt: int = SALT_AUTO_DIGEST_MAX
     hasher: Any = field(default=None, repr=False)
 
     def copy(self) -> _SignContext:
@@ -481,7 +480,7 @@ class _Provider:
         if not self._bind(context, keydata):
             return 0
         if mdname:
-            context.hash = _hash_name(mdname.decode())
+            context.hash = hash_name(mdname.decode())
         if not self._apply(context, params):
             return 0
         context.hasher = hashlib.new(context.hash or "sha256")
@@ -551,7 +550,7 @@ class _Provider:
                 else Padding.PKCS1V15
             )
             salt = (
-                _salt_length(context.salt, len(digest), record.bits)
+                salt_length(context.salt, len(digest), record.bits)
                 if padding is Padding.PSS
                 else None
             )
@@ -572,7 +571,7 @@ class _Provider:
         for param in iter_params(params):
             key = param.key
             if key == b"digest":
-                context.hash = _hash_name(read_text(param))
+                context.hash = hash_name(read_text(param))
             elif key == b"pad-mode":
                 if param.data_type == PARAM_UTF8_STRING or param.data_type == 6:
                     mode = read_text(param)
@@ -593,7 +592,7 @@ class _Provider:
                         _SALT_NAMES[text] if text in _SALT_NAMES else int(text)
                     )
             elif key == b"mgf1-digest":
-                mgf1 = _hash_name(read_text(param))
+                mgf1 = hash_name(read_text(param))
                 if context.hash and mgf1 != context.hash:
                     return False
         return True
@@ -619,17 +618,6 @@ class _Provider:
     @_guard(None)
     def _sig_gettable(self, pointer: int, provctx: int) -> int:
         return self._gettable_ctx.address
-
-
-def _salt_length(spec: int, digest_size: int, bits: int) -> int:
-    maximum = (bits - 1 + 7) // 8 - digest_size - 2
-    if spec in (_SALT_AUTO, _SALT_MAX):
-        return maximum
-    if spec in (_SALT_DIGEST, _SALT_AUTO_DIGEST_MAX):
-        return min(digest_size, maximum)
-    if spec < 0:
-        raise ValueError(f"unsupported PSS salt length {spec}")
-    return spec
 
 
 def _c_runtime() -> Any:

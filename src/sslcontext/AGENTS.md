@@ -119,7 +119,8 @@ Makes the identity the context's certificate and key; each handshake
 signature is delegated to `identity.signer`. RSA and EC certificates only.
 The signer is kept alive until `context` is garbage-collected. Raises
 `CredentialError` (malformed certificate), `UnsupportedOpenSSLError`
-(interpreter's OpenSSL cannot host the signer), `TypeError`.
+(interpreter's OpenSSL cannot host the signer), `TypeError`. Works on
+OpenSSL 1.1.1 and 3.x.
 
 ## Test helpers (`sslcontext.testing`)
 
@@ -159,9 +160,10 @@ All in `sslcontext.exceptions`, re-exported from the root.
 - `SSL_CTX_check_private_key` compares public keys only, so an `Identity`
   whose signer holds a different private key than the certificate loads
   fine and fails at the peer, which rejects the signature.
-- `sslcontext` registers an OpenSSL provider named `sslcontext` in the
-  default library context on first `load_identity` (OpenSSL 3). It offers
-  only RSA/EC key management and signatures for its own keys.
+- On first `load_identity`, `sslcontext` registers an OpenSSL provider named
+  `sslcontext` in the default library context (OpenSSL 3), or creates an
+  engine with id `sslcontext` (OpenSSL 1.1). Either serves only the keys
+  `load_identity` creates; every other key keeps using OpenSSL's own code.
 - PKCS#12 bundles encrypted with legacy algorithms (RC2, 3DES; common in old
   `.pfx` exports) need OpenSSL's `legacy` provider, which many Python builds
   do not ship; such a bundle fails with `CredentialError`. Re-export it with

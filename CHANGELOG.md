@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   memory, with no temporary files.
 - `Identity`, the `Signer` protocol and `load_identity()`: a certificate whose
   private key is used only through a signer, for every handshake signature
-  (RSA PKCS#1 v1.5 and PSS, ECDSA; TLS 1.2 and 1.3). Requires OpenSSL 3.
+  (RSA PKCS#1 v1.5 and PSS, ECDSA; TLS 1.2 and 1.3). OpenSSL 1.1.1 and 3.x.
 - `sslcontext.testing.SoftwareSigner` and `software_identity()`.
 
 ### Changed
