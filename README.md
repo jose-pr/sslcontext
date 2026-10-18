@@ -83,6 +83,7 @@ sslcontext.load_identity(ctx, card.find_identity(subject="alice"))
 | --- | --- |
 | `sslcontext` | context builder, identity loading, the `Signer` contract |
 | `sslcontext.backends` | keystore backends and their registry |
+| `sslcontext.issuing` | a local certificate authority issuing server certificates |
 | `sslcontext.testing` | `SoftwareSigner`, an in-memory signer for tests |
 | `sslcontext.exceptions` | the package's errors |
 

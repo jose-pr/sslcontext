@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   private key is used only through a signer, for every handshake signature
   (RSA PKCS#1 v1.5 and PSS, ECDSA; TLS 1.2 and 1.3). OpenSSL 1.1.1 and 3.x.
 - `sslcontext.testing.SoftwareSigner` and `software_identity()`.
+- `sslcontext.issuing`: `CertificateAuthority` (create, or load from PEM;
+  optional X.509 name constraints; encrypted key export) issuing server
+  certificates (`IssuedCertificate`) that pass strict verification, made with
+  the interpreter's own OpenSSL.
 - `Identity.info` (`CertificateInfo`: subject, issuer, serial, validity,
   SHA-1/SHA-256 thumbprints, key type and size).
 - `sslcontext.backends`: the `Backend` contract with thumbprint, subject,

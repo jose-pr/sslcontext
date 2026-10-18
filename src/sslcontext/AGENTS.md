@@ -310,6 +310,47 @@ backend = PKCS11Backend("/usr/lib64/pkcs11/opensc-pkcs11.so",
 sslcontext.load_identity(ctx, backend.find_identity(label="Certificate for PIV Authentication"))
 ```
 
+## Issuing certificates (`sslcontext.issuing`)
+
+```python
+class CertificateAuthority:
+    def __init__(self, certificate: bytes | str, key: bytes | str, password: PasswordSource = None)
+    @classmethod
+    def create(cls, common_name: str, *, permitted: Iterable[str] = (), days: float = 3650,
+               key_type: str = "ec") -> CertificateAuthority
+    certificate: bytes                 # CA certificate, PEM: what clients trust
+    der: bytes
+    info: CertificateInfo
+    def private_key_pem(self, password: str | bytes | None = None) -> bytes
+    def issue(self, names: Iterable[str], *, days: float = 30, key_type: str = "ec",
+              common_name: str | None = None) -> IssuedCertificate
+    def server_context(self, names: Iterable[str], **create_context_options) -> ssl.SSLContext
+
+@dataclass(frozen=True)
+class IssuedCertificate:
+    certificate: bytes    # leaf, PEM
+    key: bytes            # PKCS#8 PEM, unencrypted (not in repr)
+    chain: bytes          # the CA certificate, PEM
+    info: CertificateInfo # property
+    def load_into(self, context: ssl.SSLContext) -> None
+```
+
+Keys and certificates come from the interpreter's own OpenSSL (1.1.1 and
+3.x); no third-party package. `create` makes a self-signed CA (critical
+`basicConstraints CA:TRUE, pathlen:0`, `keyUsage keyCertSign,cRLSign`, SKI).
+`permitted` adds critical RFC 5280 name constraints: DNS names, where
+`corp.example`, `.corp.example` and `*.corp.example` all mean the domain and
+its subdomains, and IP networks (`10.0.0.0/8`); a name that cannot be a
+constraint (`re:...`, a wildcard inside a label) raises `ValueError`.
+`key_type` is `"ec"` (P-256) or `"rsa"` (2048), else `ValueError`. Loading
+from PEM raises `CredentialError` for malformed input or a key that is not
+the certificate's. `issue` makes a leaf with a fresh key for DNS names and
+IP addresses (SAN), `serverAuth`+`clientAuth`, SKI and AKI, valid from an
+hour ago, so strict verification (the default from Python 3.13) accepts it;
+`ValueError` for no names. `private_key_pem(password)` exports the CA key,
+AES-256 encrypted when a password is given; store it as a secret. The CA
+key lives in memory; keystore-held CA keys are not supported.
+
 ## Test helpers (`sslcontext.testing`)
 
 ```python
