@@ -84,15 +84,38 @@ def _dyld_images() -> list[str]:
     ]
 
 
-def _pick(paths: list[str], stem: str) -> str | None:
+def _linked_names(module_path: str) -> set[str]:
+    """Basenames of the libssl/libcrypto that ``module_path`` names as its
+    dependencies (Mach-O load commands, ELF ``DT_NEEDED``, PE imports all
+    keep them as plain strings)."""
+    import re
+
+    try:
+        with open(module_path, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return set()
+    names = re.findall(
+        rb"lib(?:ssl|crypto)[A-Za-z0-9._+-]*\.(?:dylib|so[.0-9]*|dll)", data
+    )
+    return {name.decode("ascii", "replace").lower() for name in names}
+
+
+def _pick(paths: list[str], stem: str, linked: set[str]) -> str | None:
     # libcrypto-3-arm64.dll, libcrypto-1_1.dll, libcrypto.so.3, libcrypto.3.dylib
+    candidates = []
     for path in paths:
         name = os.path.basename(path).lower()
         if name.startswith(stem) and (
             name.endswith(".dll") or ".so" in name or name.endswith(".dylib")
         ):
+            candidates.append(path)
+    # Several copies can be mapped (macOS frameworks load the system's own);
+    # the one _ssl was linked against wins.
+    for path in candidates:
+        if os.path.basename(path).lower() in linked:
             return path
-    return None
+    return candidates[0] if candidates else None
 
 
 def find_libraries() -> tuple[ctypes.CDLL, ctypes.CDLL]:
@@ -108,7 +131,9 @@ def find_libraries() -> tuple[ctypes.CDLL, ctypes.CDLL]:
             f"{ssl.OPENSSL_VERSION} is not supported; sslcontext needs OpenSSL 1.1.1 or 3.x"
         )
     paths = _loaded_paths()
-    ssl_path, crypto_path = _pick(paths, "libssl"), _pick(paths, "libcrypto")
+    linked = _linked_names(_ssl.__file__)
+    ssl_path = _pick(paths, "libssl", linked)
+    crypto_path = _pick(paths, "libcrypto", linked)
     if ssl_path and crypto_path:
         libssl, libcrypto = ctypes.CDLL(ssl_path), ctypes.CDLL(crypto_path)
     else:
