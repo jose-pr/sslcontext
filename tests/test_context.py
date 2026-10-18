@@ -65,3 +65,39 @@ def test_unknown_purpose_is_a_value_error():
 def test_verify_path_and_cafile_together_is_a_value_error():
     with pytest.raises(ValueError):
         sslcontext.create_context(verify=str(DATA / "ca.pem"), cafile=DATA / "ca.pem")
+
+
+class _Wrapper(ssl.SSLContext):
+    """Shaped like truststore.SSLContext: every handshake goes to an inner context."""
+
+    def __new__(cls, inner):
+        self = super().__new__(cls, ssl.PROTOCOL_TLS_CLIENT)
+        self._ctx = inner
+        return self
+
+    def __init__(self, inner):
+        pass
+
+    def wrap_socket(self, *args, **kwargs):
+        return self._ctx.wrap_socket(*args, **kwargs)
+
+
+_Wrapper.__module__ = "truststore._api"
+
+
+def test_an_identity_reaches_the_context_a_wrapper_hands_shakes_to(tls_server):
+    from sslcontext.testing import software_identity
+
+    inner = ssl.create_default_context(cafile=str(DATA / "ca.pem"))
+    wrapper = _Wrapper(inner)
+    identity = software_identity(data("client-rsa.pem"), data("client-rsa.key"))
+    sslcontext.load_identity(wrapper, identity)
+    assert tls_server.handshake(wrapper).client_cn == "client-rsa"
+
+
+def test_a_real_truststore_context_sends_the_loaded_identity(tls_server):
+    truststore = pytest.importorskip("truststore")
+    context = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.load_verify_locations(cafile=str(DATA / "ca.pem"))
+    sslcontext.load_pem(context, data("client-ec.pem"), data("client-ec.key"))
+    assert tls_server.handshake(context).client_cn == "client-ec"
