@@ -16,6 +16,7 @@ from ._pin import (
     Prompt,
 )
 from ._policy import browser_policies, rules_from_policy
+from ._sources import CertificateLike, CertificatesLike, KeyLike
 from ._select import (
     AutoSelectRule,
     CertificateRequest,
@@ -42,7 +43,9 @@ __all__ = [
     "AutoSelectRule",
     "BytesOrText",
     "CertificateInfo",
+    "CertificateLike",
     "CertificateRequest",
+    "CertificatesLike",
     "Chooser",
     "ClientCertificateSelector",
     "CredentialError",
@@ -51,6 +54,7 @@ __all__ = [
     "IdentityNotFoundError",
     "IdentitySource",
     "KEYSTORE_PROMPT",
+    "KeyLike",
     "KeystoreError",
     "Padding",
     "PasswordSource",

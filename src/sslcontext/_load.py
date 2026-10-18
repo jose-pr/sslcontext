@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import ssl
 import weakref
-from typing import Sequence, Union
+from typing import Any, Optional, Sequence, Union
 
 from ._identity import Identity
 from ._openssl import OpenSSL, openssl, ssl_ctx_pointer
@@ -13,6 +13,7 @@ from ._openssl._errors import drain_errors
 from ._openssl._objects import read_certificates, read_pkcs12, read_private_key
 from ._openssl._signing import make_private_key
 from ._pin import PasswordSource, resolve_password
+from ._sources import CertificatesLike, KeyLike, read_source, read_sources
 from .exceptions import CredentialError
 
 __all__ = ["BytesOrText", "load_identity", "load_pem", "load_pkcs12"]
@@ -29,14 +30,6 @@ _SSL_CTRL_SET_CLIENT_SIGALGS_LIST = 102
 _NO_PSS_SIGALGS = (
     b"RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA256:ECDSA+SHA384:ECDSA+SHA512"
 )
-
-
-def _as_bytes(value: BytesOrText, name: str) -> bytes:
-    if isinstance(value, str):
-        return value.encode("ascii")
-    if isinstance(value, (bytes, bytearray, memoryview)):
-        return bytes(value)
-    raise TypeError(f"{name} must be bytes or str, not {type(value).__name__}")
 
 
 def read_key_with(lib: OpenSSL, data: bytes, password: PasswordSource) -> int:
@@ -105,26 +98,33 @@ def install(
 
 def load_pem(
     context: ssl.SSLContext,
-    certificate: BytesOrText,
-    key: BytesOrText | None = None,
+    certificate: CertificatesLike,
+    key: Optional[KeyLike] = None,
     password: PasswordSource = None,
 ) -> None:
-    """Load a certificate, its chain and its private key from memory.
+    """Load a certificate, its chain and its private key.
 
-    ``certificate`` is PEM (the leaf first, then any chain certificates) or a
-    single DER certificate. ``key`` is a PEM or DER private key; when omitted
-    it is read from ``certificate``, which then holds both. ``password``
-    (a value, or a callable asked only if the key turns out encrypted)
-    decrypts an encrypted key. Nothing is written to disk.
+    ``certificate`` is the leaf followed by any chain certificates: PEM
+    holding them in order, one DER certificate, or a list of sources (each
+    PEM or DER) in that order, in any form :data:`CertificatesLike` names
+    (text, bytes, paths, objects with ``open()``, ``cryptography``
+    certificates). ``key`` is a PEM or DER private key, likewise, or a
+    ``cryptography`` private key; when omitted it is read from the first
+    certificate source, which then holds both. ``password`` (a value, or a
+    callable asked only if the key turns out encrypted) decrypts an encrypted
+    key. Nothing is written to disk.
 
     Raises :class:`CredentialError` for malformed data, a wrong password, or a
-    key that does not match the certificate.
+    key that does not match the certificate; ``OSError`` when a named file
+    cannot be read.
     """
     lib = openssl()
-    certificate_data = _as_bytes(certificate, "certificate")
-    key_data = certificate_data if key is None else _as_bytes(key, "key")
-    certificates = read_certificates(lib, certificate_data)
+    blobs = read_sources(certificate, "certificate")
+    key_data = blobs[0] if key is None else read_source(key, "key")
+    certificates: list = []
     try:
+        for blob in blobs:
+            certificates.extend(read_certificates(lib, blob))
         private_key = read_key_with(lib, key_data, password)
         try:
             install(lib, context, certificates[0], certificates[1:], private_key)
@@ -137,15 +137,16 @@ def load_pem(
 
 def load_pkcs12(
     context: ssl.SSLContext,
-    data: bytes | bytearray | memoryview,
+    data: Any,
     password: PasswordSource = None,
 ) -> None:
     """Load the key, certificate and chain of a PKCS#12 (``.p12``/``.pfx``) bundle.
 
-    Raises :class:`CredentialError` for a malformed bundle or a wrong password.
+    ``data`` is the bundle's bytes, its path, or an object with ``open()`` or
+    ``read()``. Raises :class:`CredentialError` for a malformed bundle or a
+    wrong password, ``OSError`` when a named file cannot be read.
     """
-    if not isinstance(data, (bytes, bytearray, memoryview)):
-        raise TypeError(f"data must be bytes, not {type(data).__name__}")
+    data = read_source(data, "data")
     lib = openssl()
     if callable(password):
         try:

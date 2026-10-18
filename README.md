@@ -59,13 +59,13 @@ ctx = sslcontext.system_context()
 urllib.request.urlopen("https://intranet.example.com/", context=ctx)
 ```
 
-Load a certificate and key held in memory:
+A client certificate and key, from files, PEM text, bytes, `pathlib`
+paths or `cryptography` objects alike:
 
 ```python
 import sslcontext
 
-ctx = sslcontext.create_context(cafile="ca.pem")
-sslcontext.load_pem(ctx, certificate=cert_pem, key=key_pem)
+ctx = sslcontext.create_context(ca="ca.pem", certificate="client.pem", key=key_pem)
 ```
 
 Use a certificate from the Windows store whose key cannot be exported:

@@ -6,11 +6,12 @@ import os
 import ssl
 import sys
 import warnings
-from typing import TYPE_CHECKING, Iterable, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Iterable, List, Optional, Union
 
 from ._context import VerifyLike, create_context
 from ._pin import PinSource
 from ._select import AutoSelectRule, Chooser, ClientCertificateSelector
+from ._sources import CertificatesLike, KeyLike
 
 if TYPE_CHECKING:
     from .backends import Backend
@@ -79,9 +80,14 @@ def system_context(
     selector: Union[ClientCertificateSelector, bool, None] = None,
     pin: PinSource = None,
     verify: VerifyLike = None,
+    ca: Optional[CertificatesLike] = None,
     cafile: Union[str, "os.PathLike[str]", None] = None,
     capath: Union[str, "os.PathLike[str]", None] = None,
     cadata: Union[str, bytes, None] = None,
+    certificate: Optional[CertificatesLike] = None,
+    key: Optional[KeyLike] = None,
+    password: Any = None,
+    identity: Any = None,
     minimum_version: Optional[ssl.TLSVersion] = None,
     maximum_version: Optional[ssl.TLSVersion] = None,
     alpn: Optional[Iterable[str]] = None,
@@ -90,20 +96,20 @@ def system_context(
 
     Servers are verified by the operating system (``truststore``: CryptoAPI
     on Windows, the Security framework on macOS, the system store elsewhere)
-    when the ``system`` extra is installed, and by OpenSSL over the default
-    store otherwise. A ``verify``, ``cafile``, ``capath`` or ``cadata`` means
-    what it means to :func:`create_context` and replaces the system's trust.
+    on Python 3.10 and later, and by OpenSSL over the default store on 3.9.
+    A ``verify``, ``ca``, ``cafile``, ``capath`` or ``cadata`` means what it
+    means to :func:`create_context` and replaces the system's trust.
 
     A server's certificate request is answered by ``selector``: by default
     :func:`system_selector` ``(pin=pin)``; ``False`` sends no certificate.
-    TLS 1.3 post-handshake requests are accepted. One context serves every
+    A ``certificate`` (with ``key`` and ``password``) or an ``identity`` is
+    loaded as by :func:`create_context` and is then the one sent: the
+    default selector is not installed unless ``selector`` asks for it. TLS
+    1.3 post-handshake requests are accepted. One context serves every
     server and may be shared between threads.
     """
-    custom_trust = (
-        verify is not None
-        or cafile is not None
-        or capath is not None
-        or cadata is not None
+    custom_trust = any(
+        value is not None for value in (verify, ca, cafile, capath, cadata)
     )
     truststore_class = None if custom_trust else _truststore()
     if truststore_class is not None:
@@ -114,20 +120,37 @@ def system_context(
             context.maximum_version = maximum_version
         if alpn is not None:
             context.set_alpn_protocols(list(alpn))
+        if certificate is not None:
+            from ._load import load_pem
+
+            load_pem(context, certificate, key, password)
+        elif key is not None:
+            raise ValueError("key needs its certificate")
+        if identity is not None:
+            from ._load import load_identity
+
+            load_identity(context, identity)
     else:
         context = create_context(
             "client",
             verify=verify,
+            ca=ca,
             cafile=cafile,
             capath=capath,
             cadata=cadata,
+            certificate=certificate,
+            key=key,
+            password=password,
+            identity=identity,
             minimum_version=minimum_version,
             maximum_version=maximum_version,
             alpn=alpn,
         )
     if ssl.HAS_TLSv1_3:  # read-only on a TLS library without it (LibreSSL 2.x)
         context.post_handshake_auth = True
-    if selector is None or selector is True:
+    if selector is None:
+        selector = certificate is None and identity is None
+    if selector is True:
         selector = system_selector(pin=pin)
     if selector is not False:
         if not isinstance(selector, ClientCertificateSelector):

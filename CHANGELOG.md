@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `sslcontext` command (extra `cli`): `list` and `show` keystore
   identities, `probe URL` to see a server's certificate request, the
   candidates and the certificate sent.
+- `create_context()` and `system_context()` take `ca=`, `certificate=`,
+  `key=`, `password=` and `identity=`. Every certificate, key, CA and
+  bundle argument (including `load_pem()` and `load_pkcs12()`) accepts PEM
+  text, PEM or DER bytes, a path, an object with `open()` or `read()`, a
+  `cryptography` certificate or private key, or a list of them.
 - Apple's `/usr/bin/python3` (LibreSSL 2.8) is supported: keystore
   identities sign through it over TLS 1.2, and client certificates are
   chosen when the server asks.

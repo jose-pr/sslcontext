@@ -23,7 +23,8 @@ from typing import Iterable, List, Optional, Union
 
 from ._context import create_context
 from ._identity import CertificateInfo
-from ._load import BytesOrText, _as_bytes, load_pem, read_key_with
+from ._load import BytesOrText, load_pem, read_key_with
+from ._sources import read_source
 from ._openssl import OpenSSL, openssl
 from ._openssl._errors import drain_errors
 from ._openssl._objects import certificate_der, certificate_fields, read_certificates
@@ -252,12 +253,12 @@ class CertificateAuthority:
     ) -> None:
         self._lib = lib = openssl()
         self._lock = threading.Lock()
-        certificates = read_certificates(lib, _as_bytes(certificate, "certificate"))
+        certificates = read_certificates(lib, read_source(certificate, "certificate"))
         for extra in certificates[1:]:
             lib.X509_free(extra)
         self._x509 = certificates[0]
         self._key = 0
-        self._key = read_key_with(lib, _as_bytes(key, "key"), password)
+        self._key = read_key_with(lib, read_source(key, "key"), password)
         public = lib.X509_get_pubkey(self._x509)
         try:
             matches = (

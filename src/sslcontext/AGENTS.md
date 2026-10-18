@@ -27,6 +27,11 @@ def create_context(
     cafile: str | os.PathLike | None = None,
     capath: str | os.PathLike | None = None,
     cadata: str | bytes | None = None,
+    ca: CertificatesLike | None = None,
+    certificate: CertificatesLike | None = None,
+    key: KeyLike | None = None,
+    password: PasswordSource = None,
+    identity: Identity | None = None,
     minimum_version: ssl.TLSVersion | None = None,
     maximum_version: ssl.TLSVersion | None = None,
     alpn: Iterable[str] | None = None,
@@ -41,17 +46,47 @@ verification on (a server then requires a client certificate); `False` turns
 it off (a client stops checking the host name too). A path in `verify` means
 "trust this CA bundle file, or this hashed CA directory", as in `requests`;
 combining it with `cafile`/`capath` is a `ValueError`. Trust comes from
-`cafile`/`capath`/`cadata` when given, else the platform's default store.
+`ca`/`cafile`/`capath`/`cadata` when given, else the platform's default
+store; `ca` with `cadata` is a `ValueError`. `certificate`, `key` and
+`password` load the context's own certificate as `load_pem` does (a `key`
+alone is a `ValueError`); `identity` as `load_identity` does. A client
+context with a certificate is an mTLS context in one call:
+
+```python
+ctx = sslcontext.create_context(ca="ca.pem", certificate="client.pem", key="client.key")
+```
 
 `VerifyLike` is the exported alias for the `verify` type.
+
+### Certificate and key sources
+
+```python
+CertificateLike = str | bytes | os.PathLike | <has open()> | <has read()> | cryptography.x509.Certificate
+CertificatesLike = CertificateLike | list[CertificateLike] | tuple[CertificateLike, ...]
+KeyLike = str | bytes | os.PathLike | <has open()> | <has read()> | <cryptography private key>
+```
+
+Every certificate, key, CA and bundle argument takes any of these. A `str`
+holding a PEM header (`-----BEGIN `) is PEM text; any other `str` is a path.
+Bytes are PEM or DER. `os.PathLike` is a path; an object with `open()`
+(`pathlib.Path`, pathlib-next paths, `zipfile.Path`,
+`importlib.resources` files) is opened `"rb"`; an object with `read()` is
+read (text is encoded as ASCII). A `cryptography` certificate (it has
+`public_bytes` and `fingerprint`) or private key (it has `private_bytes`;
+written unencrypted, in memory only) is converted; `cryptography` is never
+imported otherwise. A list holds several sources in order: a CA bundle, or
+a leaf followed by its chain; an empty list is a `ValueError`. Anything else
+is a `TypeError`; a file that cannot be read raises its `OSError` (a
+mistyped path in a `str` is `FileNotFoundError`, never "not PEM").
 
 ## The system's context: OS trust and browser-like client certificates (`sslcontext`)
 
 ```python
 def system_context(*, selector: ClientCertificateSelector | bool | None = None,
-                   pin: PinSource = None, verify=None, cafile=None, capath=None,
-                   cadata=None, minimum_version=None, maximum_version=None,
-                   alpn=None) -> ssl.SSLContext
+                   pin: PinSource = None, verify=None, ca=None, cafile=None,
+                   capath=None, cadata=None, certificate=None, key=None,
+                   password=None, identity=None, minimum_version=None,
+                   maximum_version=None, alpn=None) -> ssl.SSLContext
 def system_selector(*, pin: PinSource = None, choose: Chooser | None = None,
                     rules: Iterable[AutoSelectRule] = (), browser_policy: bool = True,
                     remember: bool = True, cache_ttl: float = 60.0
@@ -63,9 +98,13 @@ def system_sources(*, pin: PinSource = None) -> list[Backend]
 browser. Servers are verified by the operating system (a
 `truststore.SSLContext`: CryptoAPI on Windows, the Security framework on
 macOS) on Python 3.10+, and by OpenSSL over the default store on 3.9
-(truststore needs 3.10); `verify`/`cafile`/`capath`/`cadata` replace that trust exactly as for
-`create_context`. When a server asks for a client certificate, `selector`
-answers (default `system_selector(pin=pin)`; `False`: never send one).
+(truststore needs 3.10); `verify`/`ca`/`cafile`/`capath`/`cadata` replace
+that trust exactly as for `create_context`. When a server asks for a client
+certificate, `selector` answers (default `system_selector(pin=pin)`;
+`False`: never send one). A `certificate` (+ `key`, `password`) or
+`identity` is loaded as by `create_context` and is then the certificate
+sent: the default selector is not installed then (pass `selector=True` or
+one of your own to have both).
 `post_handshake_auth` is on. Nothing is opened until a server asks; one
 context serves every server and every thread, so share it (urllib3 keys its
 pools by context). `system_sources()`: Windows `CNGBackend("MY")` (smart-card
@@ -166,34 +205,36 @@ ctx = sslcontext.system_context(selector=selector)
 ```python
 def load_pem(
     context: ssl.SSLContext,
-    certificate: bytes | str,
-    key: bytes | str | None = None,
+    certificate: CertificatesLike,
+    key: KeyLike | None = None,
     password: PasswordSource = None,
 ) -> None
 ```
 
-Makes `certificate` (+ chain) and `key` the context's identity without
-touching the disk. `certificate` is PEM text (leaf first, then chain) or one
-DER certificate. `key` is a PEM or DER private key; omitted, it is read from
-`certificate` (a combined PEM). `password` decrypts an encrypted key; see
-[PINs and passwords](#pins-and-passwords-sslcontext).
+Makes `certificate` (+ chain) and `key` the context's identity; nothing is
+written to disk. `certificate` is the leaf then its chain: PEM holding them
+in order, one DER certificate, or a list of sources in that order. `key` is
+a PEM or DER private key (or a `cryptography` key); omitted, it is read from
+the first certificate source (a combined PEM). `password` decrypts an
+encrypted key; see [PINs and passwords](#pins-and-passwords-sslcontext).
 
 ```python
 def load_pkcs12(
     context: ssl.SSLContext,
-    data: bytes,
+    data: bytes | str | os.PathLike | <has open()> | <has read()>,
     password: PasswordSource = None,
 ) -> None
 ```
 
-Loads the key, certificate and chain of a PKCS#12 (`.p12`/`.pfx`) bundle.
+Loads the key, certificate and chain of a PKCS#12 (`.p12`/`.pfx`) bundle,
+given as its bytes or where it is (a `str` is a path here).
 
 Both raise `CredentialError` for malformed data, a wrong or missing password,
 or a key that does not match the certificate, and `TypeError` when `context`
 is not an `ssl.SSLContext`. An identity of one key type (RSA, EC) replaces a
 previously loaded identity of the same type; identities of different types
-coexist and OpenSSL picks per handshake. `BytesOrText` is the exported alias
-for the credential argument types. Every loader (and `install`) configures
+coexist and OpenSSL picks per handshake. `BytesOrText` (bytes or text) is
+kept as an exported alias. Every loader (and `install`) configures
 a `truststore.SSLContext` through the inner context its connections use.
 
 ## Keystore identities (`sslcontext`)
