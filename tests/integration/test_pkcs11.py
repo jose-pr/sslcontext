@@ -328,3 +328,23 @@ def test_virtual_smart_card_survives_removal_and_reinsertion(virtual_card):
         run(VIRT_CACARD, "-i")
         time.sleep(3)
         assert server.handshake(context).client_cn == identity.info.subject
+
+
+def test_a_selector_answers_from_the_token(softhsm, tls_server):
+    backend = PKCS11Backend(softhsm, token=LABEL, pin=PIN)
+    selector = sslcontext.ClientCertificateSelector(
+        [backend],
+        rules=[sslcontext.AutoSelectRule("localhost", subject={"CN": "client-ec"})],
+    )
+    context = trusting_client()
+    selector.install(context)
+    assert tls_server.handshake(context) == ("client-ec", "TLSv1.3")
+
+
+def test_system_sources_use_the_configured_module(softhsm, monkeypatch):
+    monkeypatch.setenv("SSLCONTEXT_PKCS11_MODULE", softhsm)
+    from sslcontext.backends._pkcs11 import default_module
+
+    (source,) = sslcontext.system_sources(pin=PIN)
+    assert isinstance(source, PKCS11Backend) and source.module is None
+    assert default_module() == softhsm

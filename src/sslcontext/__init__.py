@@ -23,6 +23,7 @@ from ._select import (
     ClientCertificateSelector,
     IdentitySource,
 )
+from ._system import system_context, system_selector, system_sources
 from .exceptions import (
     CredentialError,
     IdentityNotFoundError,
@@ -69,4 +70,7 @@ __all__ = [
     "load_pem",
     "load_pkcs12",
     "rules_from_policy",
+    "system_context",
+    "system_selector",
+    "system_sources",
 ]

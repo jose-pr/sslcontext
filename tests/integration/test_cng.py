@@ -174,3 +174,16 @@ def test_unknown_thumbprint_is_not_found():
 def test_bad_location_is_a_value_error():
     with pytest.raises(ValueError):
         CNGBackend(location="everywhere")
+
+
+def test_the_system_context_answers_from_the_personal_store(tmp_path):
+    from test_select import announce
+
+    with created("ec") as certificate:
+        server = TLSServer(trust=certificate.der)
+        # Named as an acceptable CA, so no other certificate of the store fits.
+        pem = ssl.DER_cert_to_PEM_cert(certificate.der).encode()
+        announce(server, pem, tmp_path=tmp_path)
+        context = sslcontext.system_context(cafile=str(DATA / "ca.pem"))
+        with server:
+            assert server.handshake(context) == (certificate.subject, "TLSv1.3")

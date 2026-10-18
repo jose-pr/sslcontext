@@ -207,9 +207,9 @@ def _windows() -> _API:
 
 def _last_error(action: str) -> KeystoreError:
     code = ctypes.get_last_error() & 0xFFFFFFFF
-    return KeystoreError(
-        code, f"{action} failed: 0x{code:08X} {ctypes.FormatError(code).strip()}"
-    )
+    # FormatError takes a signed long: an HRESULT above 0x7FFFFFFF wraps.
+    text = ctypes.FormatError(ctypes.c_long(code).value).strip()
+    return KeystoreError(code, f"{action} failed: 0x{code:08X} {text}")
 
 
 def _status_error(action: str, status: int) -> KeystoreError:

@@ -23,7 +23,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["black", "build", "pytest"]
+# system_context(): the operating system verifies servers (truststore needs 3.10).
+system = ['truststore>=0.10,<0.11; python_version >= "3.10"']
+dev = ["black", "build", "pytest", "sslcontext[system]"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
 
 [project.urls]

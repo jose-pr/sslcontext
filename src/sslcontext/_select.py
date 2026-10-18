@@ -304,26 +304,32 @@ class ClientCertificateSelector:
         found = []
         for identity in self.identities():
             try:
-                info = identity.info
-                prepared = self._prepare(identity)
+                if self._offered(identity, request, now, wanted):
+                    found.append(identity)
             except Exception as error:  # noqa: BLE001 - one bad entry is skipped
                 _log.debug("sslcontext: skipping %r: %s", identity, error)
-                continue
-            if not info.valid_at(now) or not prepared.client_auth:
-                continue
-            if info.key_type not in request.key_types:
-                continue
-            if (
-                info.key_type == "rsa"
-                and request.rsa_pss_required
-                and not getattr(identity.signer, "supports_pss", True)
-            ):
-                continue
-            if wanted and not wanted & prepared.names:
-                continue
-            found.append(identity)
         found.sort(key=lambda identity: identity.info.not_after, reverse=True)
         return found
+
+    def _offered(
+        self,
+        identity: Identity,
+        request: CertificateRequest,
+        now: datetime.datetime,
+        wanted: set,
+    ) -> bool:
+        info = identity.info
+        if not info.valid_at(now) or info.key_type not in request.key_types:
+            return False
+        prepared = self._prepare(identity)
+        if not prepared.client_auth or (wanted and not wanted & prepared.names):
+            return False
+        # Last: asking a keystore about its key may open it.
+        return not (
+            info.key_type == "rsa"
+            and request.rsa_pss_required
+            and not getattr(identity.signer, "supports_pss", True)
+        )
 
     def select(self, request: CertificateRequest) -> Optional[Identity]:
         """The identity to answer ``request`` with, or ``None`` for none."""

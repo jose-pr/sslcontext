@@ -389,3 +389,20 @@ def test_browser_policy_rules_pick(ca_b, identity_a, identity_b, tmp_path, monke
     selector = ClientCertificateSelector([identity_a, identity_b], browser_policy=True)
     with server(ca_b, tmp_path=tmp_path) as anyone:
         assert anyone.handshake(client(selector)).client_cn == "client-rsa"
+
+
+class _Unopenable:
+    @property
+    def supports_pss(self):
+        raise KeystoreError("the smart card is not inserted")
+
+    def sign(self, digest, **kwargs):
+        raise AssertionError("never asked")
+
+
+def test_an_identity_whose_key_cannot_be_probed_is_skipped(identity_a):
+    absent = sslcontext.Identity(identity_a.certificate, _Unopenable())
+    selector = ClientCertificateSelector([absent, identity_a])
+    assert selector.candidates(request(rsa_pss_required=True)) == [identity_a]
+    # Not asked at all when a cheaper check already rules it out.
+    assert selector.candidates(request(key_types=frozenset({"ec"}))) == []
