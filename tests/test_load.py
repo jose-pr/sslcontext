@@ -5,10 +5,13 @@ import ssl
 import pytest
 
 import sslcontext
-from conftest import data
+from conftest import data, needs_tls13
 
 
-@pytest.mark.parametrize("version", [ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3])
+@pytest.mark.parametrize(
+    "version",
+    [ssl.TLSVersion.TLSv1_2, pytest.param(ssl.TLSVersion.TLSv1_3, marks=needs_tls13)],
+)
 @pytest.mark.parametrize("name", ["client-rsa", "client-ec"])
 def test_load_pem_authenticates_the_client(tls_server, client_context, name, version):
     client_context.maximum_version = version

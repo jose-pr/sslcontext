@@ -33,7 +33,8 @@ def salt_length(spec: int, digest_size: int, bits: int) -> int:
 def make_private_key(lib: OpenSSL, handle: int, key_type: str) -> int:
     """An ``EVP_PKEY *`` (owned by the caller) that signs through ``handle``.
 
-    OpenSSL 3 gets a provider key; OpenSSL 1.1 a key bound to an engine.
+    OpenSSL 3 gets a provider key; OpenSSL 1.1 and LibreSSL a key bound to an
+    engine.
     """
     if lib.is_v3:
         from ._provider import make_key

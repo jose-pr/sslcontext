@@ -23,6 +23,7 @@ from typing import (
     Union,
 )
 
+from ._asn1 import ANY_EXTENDED_KEY_USAGE, CLIENT_AUTH, certificate_usages
 from ._identity import Identity
 from .exceptions import KeystoreError
 
@@ -39,11 +40,8 @@ __all__ = [
 
 _log = logging.getLogger("sslcontext")
 
-# x509v3.h: XKU_SSL_CLIENT, XKU_ANYEKU, KU_DIGITAL_SIGNATURE; all ones = absent.
-_XKU_SSL_CLIENT = 0x2
-_XKU_ANYEKU = 0x100
+# x509v3.h: KU_DIGITAL_SIGNATURE, the first octet's high bit.
 _KU_DIGITAL_SIGNATURE = 0x80
-_ABSENT = 0xFFFFFFFF
 _NO_PSS_SIGALGS = (
     b"RSA+SHA256:RSA+SHA384:RSA+SHA512:ECDSA+SHA256:ECDSA+SHA384:ECDSA+SHA512"
 )
@@ -284,11 +282,11 @@ class ClientCertificateSelector:
             for link in identity.chain:
                 certificates.extend(read_certificates(lib, link))
             leaf = certificates[0]
-            usage = lib.X509_get_extended_key_usage(leaf)
-            key_usage = lib.X509_get_key_usage(leaf)
+            extended, key_usage = certificate_usages(identity.certificate)
             client_auth = (
-                usage == _ABSENT or bool(usage & (_XKU_SSL_CLIENT | _XKU_ANYEKU))
-            ) and (key_usage == _ABSENT or bool(key_usage & _KU_DIGITAL_SIGNATURE))
+                extended is None
+                or bool(extended & {CLIENT_AUTH, ANY_EXTENDED_KEY_USAGE})
+            ) and (key_usage is None or bool(key_usage & _KU_DIGITAL_SIGNATURE))
             names = {_name_der(lib, lib.X509_get_issuer_name(leaf))}
             for pointer in certificates[1:]:
                 names.add(_name_der(lib, lib.X509_get_subject_name(pointer)))

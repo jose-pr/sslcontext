@@ -7,6 +7,7 @@ import threading
 import pytest
 
 import sslcontext
+from conftest import TOP_VERSION
 from sslcontext.issuing import CertificateAuthority
 
 
@@ -52,12 +53,12 @@ def test_issued_certificates_verify_strictly(ca, key_type):
     if key_type == "rsa":
         server = sslcontext.create_context("server")
         ca.issue(["localhost"], key_type="rsa").load_into(server)
-    assert handshake(server, trusting(ca), "localhost") == "TLSv1.3"
+    assert handshake(server, trusting(ca), "localhost") == TOP_VERSION
 
 
 def test_ip_names_are_subject_alternative_names(ca):
     server = ca.server_context(["127.0.0.1"])
-    assert handshake(server, trusting(ca), "127.0.0.1") == "TLSv1.3"
+    assert handshake(server, trusting(ca), "127.0.0.1") == TOP_VERSION
 
 
 def test_issued_certificate_reports_its_names_and_issuer(ca):

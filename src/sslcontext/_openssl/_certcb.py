@@ -4,6 +4,11 @@
 CertificateRequest (TLS 1.3 post-handshake requests included). One ctypes
 callback serves every context; its argument names the handler registered for
 that context.
+
+LibreSSL has only ``SSL_CTX_set_client_cert_cb``, which returns a certificate
+and key instead of setting them, takes no argument (the handler is found by
+the connection's ``SSL_CTX``), sends no chain of its own, and is not called
+when the context already holds a certificate.
 """
 
 from __future__ import annotations
@@ -14,7 +19,7 @@ import logging
 import ssl
 import threading
 import weakref
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..exceptions import CredentialError
 from ._api import OpenSSL
@@ -42,6 +47,42 @@ _lock = threading.Lock()
 _handlers: Dict[int, Handler] = {}
 _by_context: Dict[int, int] = {}
 _ids = itertools.count(1)
+
+
+_CLIENT_CERT = ctypes.CFUNCTYPE(
+    ctypes.c_int,
+    ctypes.c_void_p,
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.POINTER(ctypes.c_void_p),
+)
+_pending = threading.local()
+
+
+@_CLIENT_CERT  # type: ignore[misc]
+def _dispatch_client_cert(ssl_pointer: Optional[int], x509: Any, key: Any) -> int:
+    from ._api import openssl
+
+    lib = openssl()
+    with _lock:
+        handler = _handlers.get(
+            _by_context.get(lib.SSL_get_SSL_CTX(ssl_pointer) or 0, 0)
+        )
+    if handler is None or not ssl_pointer:
+        return 0
+    _pending.answer = None
+    try:
+        handler(ssl_pointer)
+    except BaseException:  # noqa: BLE001 - nothing may unwind into OpenSSL
+        _log.warning("sslcontext: client certificate selection failed", exc_info=True)
+        return 0
+    answer, _pending.answer = _pending.answer, None
+    if answer is None:
+        return 0
+    certificate, private_key = answer
+    lib.X509_up_ref(certificate)  # the connection frees what it is given
+    lib.EVP_PKEY_up_ref(private_key)
+    x509[0], key[0] = certificate, private_key
+    return 1
 
 
 @_CALLBACK  # type: ignore[misc]
@@ -75,9 +116,16 @@ def install_handler(lib: OpenSSL, context: ssl.SSLContext, handler: Handler) -> 
             _handlers.pop(previous, None)
         _handlers[handler_id] = handler
         _by_context[pointer] = handler_id
-    lib.SSL_CTX_set_cert_cb(
-        pointer, ctypes.cast(_dispatch, ctypes.c_void_p), ctypes.c_void_p(handler_id)
-    )
+    if lib.is_libressl:
+        lib.SSL_CTX_set_client_cert_cb(
+            pointer, ctypes.cast(_dispatch_client_cert, ctypes.c_void_p)
+        )
+    else:
+        lib.SSL_CTX_set_cert_cb(
+            pointer,
+            ctypes.cast(_dispatch, ctypes.c_void_p),
+            ctypes.c_void_p(handler_id),
+        )
     weakref.finalize(handshake_context(context), _forget, pointer, handler_id)
 
 
@@ -110,7 +158,11 @@ def read_request(
             name = lib.OPENSSL_sk_value(names, index)
             authorities.append((_name_text(lib, name), _name_der(lib, name)))
     signs = set()
-    count = lib.SSL_get_sigalgs(ssl_pointer, 0, None, None, None, None, None)
+    count = (
+        0
+        if lib.is_libressl  # no SSL_get_sigalgs
+        else lib.SSL_get_sigalgs(ssl_pointer, 0, None, None, None, None, None)
+    )
     for index in range(max(count, 0)):
         sign = ctypes.c_int()
         lib.SSL_get_sigalgs(
@@ -145,7 +197,11 @@ def use_identity(
 ) -> None:
     """Make ``certificate``, ``chain`` and ``key`` this connection's identity;
     the connection takes its own references. ``sigalgs`` limits the
-    connection's own signature algorithms."""
+    connection's own signature algorithms. On LibreSSL the certificate and key
+    become the client-certificate callback's answer, without the chain."""
+    if lib.is_libressl:
+        _pending.answer = (certificate, key)
+        return
     lib.ERR_clear_error()
     if not lib.SSL_use_certificate(ssl_pointer, certificate):
         raise CredentialError(f"certificate rejected: {drain_errors(lib)}")

@@ -125,7 +125,8 @@ def system_context(
             maximum_version=maximum_version,
             alpn=alpn,
         )
-    context.post_handshake_auth = True
+    if ssl.HAS_TLSv1_3:  # read-only on a TLS library without it (LibreSSL 2.x)
+        context.post_handshake_auth = True
     if selector is None or selector is True:
         selector = system_selector(pin=pin)
     if selector is not False:

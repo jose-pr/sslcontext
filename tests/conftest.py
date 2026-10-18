@@ -10,6 +10,17 @@ import pytest
 
 DATA = Path(__file__).parent / "data"
 
+#: The newest protocol the interpreter's TLS library speaks (LibreSSL 2.x: 1.2).
+TOP_VERSION = "TLSv1.3" if ssl.HAS_TLSv1_3 else "TLSv1.2"
+needs_tls13 = pytest.mark.skipif(
+    not ssl.HAS_TLSv1_3, reason="this TLS library has no TLS 1.3"
+)
+#: SSL_CTX_set1_client_sigalgs_list, which servers here use to steer clients.
+needs_client_sigalgs = pytest.mark.skipif(
+    ssl.OPENSSL_VERSION.startswith("LibreSSL"),
+    reason="LibreSSL cannot restrict a server's client signature algorithms",
+)
+
 
 def data(name: str) -> bytes:
     return (DATA / name).read_bytes()

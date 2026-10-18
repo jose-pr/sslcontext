@@ -13,7 +13,7 @@ import weakref
 import pytest
 
 import sslcontext
-from conftest import DATA, TLSServer, data
+from conftest import DATA, TLSServer, data, needs_client_sigalgs, needs_tls13
 from sslcontext.testing import SoftwareSigner, software_identity
 
 TLS12, TLS13 = ssl.TLSVersion.TLSv1_2, ssl.TLSVersion.TLSv1_3
@@ -23,6 +23,7 @@ def identity(name: str) -> sslcontext.Identity:
     return software_identity(data(f"{name}.pem"), data(f"{name}.key"))
 
 
+@needs_tls13
 def test_rsa_over_tls13_signs_with_pss(tls_server, client_context):
     client_context.minimum_version = TLS13
     ident = identity("client-rsa")
@@ -34,6 +35,7 @@ def test_rsa_over_tls13_signs_with_pss(tls_server, client_context):
     assert salt == {"sha256": 32, "sha384": 48, "sha512": 64}[hash_name]
 
 
+@needs_client_sigalgs
 def test_rsa_over_tls12_signs_with_pkcs1_when_the_server_asks(client_context):
     client_context.maximum_version = TLS12
     ident = identity("client-rsa")
@@ -43,14 +45,18 @@ def test_rsa_over_tls12_signs_with_pkcs1_when_the_server_asks(client_context):
     assert ident.signer.calls[-1] == ("sha256", sslcontext.Padding.PKCS1V15, None)
 
 
-@pytest.mark.parametrize("version", [TLS12, TLS13])
+@pytest.mark.parametrize("version", [TLS12, pytest.param(TLS13, marks=needs_tls13)])
 def test_ec_signs_ecdsa(tls_server, client_context, version):
     client_context.minimum_version = client_context.maximum_version = version
     ident = identity("client-ec")
     sslcontext.load_identity(client_context, ident)
     assert tls_server.handshake(client_context).client_cn == "client-ec"
     hash_name, padding, salt = ident.signer.calls[-1]
-    assert (padding, salt) == (None, None) and hash_name == "sha256"
+    assert (padding, salt) == (None, None)
+    # TLS 1.3 fixes P-256 to SHA-256; over 1.2 the client picks among the server's.
+    assert hash_name in (
+        ("sha256",) if version is TLS13 else ("sha256", "sha384", "sha512")
+    )
 
 
 def test_rsa_and_ec_identities_coexist(tls_server, client_context):

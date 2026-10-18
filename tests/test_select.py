@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 import sslcontext
-from conftest import DATA, TLSServer, data
+from conftest import DATA, TOP_VERSION, TLSServer, data
 from sslcontext import AutoSelectRule, CertificateRequest, ClientCertificateSelector
 from sslcontext.exceptions import KeystoreError
 from sslcontext.issuing import CertificateAuthority
@@ -112,7 +112,8 @@ def test_choose_sees_the_request_and_picks(ca_b, identity_a, identity_b, tmp_pat
         cn = anyone.handshake(context).client_cn
     ((req, subjects),) = seen
     assert req.host == "localhost" and req.authorities == ()
-    assert req.tls_version == "TLSv1.3" and req.rsa_pss_required
+    assert req.tls_version == TOP_VERSION
+    assert req.rsa_pss_required is ssl.HAS_TLSv1_3
     assert "rsa" in req.key_types and "ec" in req.key_types
     assert cn == subjects[-1].split(",")[0].split("=")[1]
 
@@ -192,8 +193,9 @@ def test_a_pkcs1_only_key_answers_tls12_and_sits_out_tls13(ca_b, tmp_path):
     context = client(ClientCertificateSelector([identity]))
     with server(ca_b, CA_A, tmp_path=tmp_path, maximum=ssl.TLSVersion.TLSv1_2) as tls12:
         assert tls12.handshake(context) == ("client-rsa", "TLSv1.2")
-    with server(ca_b, CA_A, tmp_path=tmp_path, mode=ssl.CERT_OPTIONAL) as tls13:
-        assert tls13.handshake(context) == ("-", "TLSv1.3")
+    if ssl.HAS_TLSv1_3:
+        with server(ca_b, CA_A, tmp_path=tmp_path, mode=ssl.CERT_OPTIONAL) as tls13:
+            assert tls13.handshake(context) == ("-", "TLSv1.3")
 
 
 def test_a_failing_source_is_skipped(ca_b, identity_b, tmp_path):

@@ -1,9 +1,15 @@
-"""OpenSSL 1.1: keys bound to an in-process engine whose ``sign`` is a :class:`Signer`.
+"""OpenSSL 1.1 and LibreSSL: keys bound to an in-process engine whose ``sign``
+is a :class:`Signer`.
 
 A key is the certificate's public key with the engine attached
 (``EVP_PKEY_set1_engine``). The engine supplies RSA and EC pkey methods
 copied from OpenSSL's own, with only ``sign`` replaced, so padding and digest
 handling stay OpenSSL's and the signer receives the finished digest.
+
+LibreSSL 2.x exports neither ``EVP_PKEY_set1_engine`` nor
+``EVP_PKEY_meth_get_sign``; their fields are reached in the structures, whose
+layout (OpenSSL 1.0's) is checked against the library before anything is
+written.
 
 The engine, its methods and the callbacks are never freed: OpenSSL may reach
 them until the process exits.
@@ -93,7 +99,12 @@ class _Engine:
             )
         lib.EVP_PKEY_meth_copy(method, source)
         sign_init, sign = c_void_p(), c_void_p()
-        lib.EVP_PKEY_meth_get_sign(source, ctypes.byref(sign_init), ctypes.byref(sign))
+        if lib.is_libressl:
+            sign_init.value = _method_sign_init(lib, source)
+        else:
+            lib.EVP_PKEY_meth_get_sign(
+                source, ctypes.byref(sign_init), ctypes.byref(sign)
+            )
         lib.EVP_PKEY_meth_set_sign(
             method, sign_init.value, ctypes.cast(self._sign_callback, c_void_p).value
         )
@@ -133,7 +144,13 @@ class _Engine:
             length[0] = record.max_size
             return 1
         md = c_void_p()
-        self._ctrl(context, _CTRL_GET_MD, md)
+        if (
+            lib.EVP_PKEY_CTX_ctrl(context, -1, -1, _CTRL_GET_MD, 0, ctypes.byref(md))
+            <= 0
+        ):
+            # LibreSSL does not answer it; the digest's size names the hash.
+            lib.ERR_clear_error()
+            md.value = None
         if md.value:
             name = hash_name(lib.OBJ_nid2sn(lib.EVP_MD_type(md.value)).decode())
         else:
@@ -182,7 +199,12 @@ class _Engine:
             raise UnsupportedOpenSSLError(
                 f"cannot copy the public key: {drain_errors(lib)}"
             )
-        if not lib.EVP_PKEY_set1_engine(key, self.engine):
+        attached = (
+            _attach_engine(lib, key, self.engine)
+            if lib.is_libressl
+            else lib.EVP_PKEY_set1_engine(key, self.engine)
+        )
+        if not attached:
             lib.EVP_PKEY_free(key)
             raise UnsupportedOpenSSLError(
                 f"cannot attach the engine: {drain_errors(lib)}"
@@ -190,6 +212,47 @@ class _Engine:
         with self._lock:
             self._keys[key] = handle
         return key
+
+
+# OpenSSL 1.0's struct evp_pkey_method_st: int pkey_id, int flags, then
+# init, copy, cleanup, paramgen_init, paramgen, keygen_init, keygen,
+# sign_init, sign; struct evp_pkey_st: int type, save_type, references,
+# then ameth, engine.
+_POINTER = ctypes.sizeof(c_void_p)
+_SIGN_INIT_AT = 8 + 7 * _POINTER
+_SIGN_AT = _SIGN_INIT_AT + _POINTER
+_AMETH_AT = 16
+_ENGINE_AT = _AMETH_AT + _POINTER
+
+
+def _pointer_at(address: int, offset: int) -> int:
+    return c_void_p.from_address(address + offset).value or 0
+
+
+def _method_sign_init(lib: OpenSSL, source: int) -> int:
+    """``source``'s ``sign_init``, read after proving where ``set_sign`` writes."""
+    probe = lib.EVP_PKEY_meth_new(_EVP_PKEY_EC, 0)
+    lib.EVP_PKEY_meth_set_sign(probe, 0x1111, 0x2222)
+    found = (_pointer_at(probe, _SIGN_INIT_AT), _pointer_at(probe, _SIGN_AT))
+    lib.EVP_PKEY_meth_free(probe)
+    if found != (0x1111, 0x2222):
+        raise UnsupportedOpenSSLError("unexpected EVP_PKEY_METHOD layout")
+    return _pointer_at(source, _SIGN_INIT_AT)
+
+
+def _attach_engine(lib: OpenSSL, key: int, engine: int) -> bool:
+    """``EVP_PKEY_set1_engine`` for LibreSSL: one functional reference, which
+    ``EVP_PKEY_free`` gives back."""
+    if (
+        ctypes.c_int.from_address(key).value != lib.EVP_PKEY_id(key)
+        or _pointer_at(key, _AMETH_AT) != lib.EVP_PKEY_get0_asn1(key)
+        or _pointer_at(key, _ENGINE_AT) != 0
+    ):
+        raise UnsupportedOpenSSLError("unexpected EVP_PKEY layout")
+    if not lib.ENGINE_init(engine):
+        return False
+    c_void_p.from_address(key + _ENGINE_AT).value = engine
+    return True
 
 
 _engine: _Engine | None = None

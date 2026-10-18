@@ -122,14 +122,10 @@ def find_libraries() -> tuple[ctypes.CDLL, ctypes.CDLL]:
     """Return ``(libssl, libcrypto)`` as loaded by :mod:`ssl`.
 
     Raises :class:`UnsupportedOpenSSLError` when the interpreter links an
-    OpenSSL these bindings cannot reach (LibreSSL, a static build).
+    OpenSSL these bindings cannot reach (a static build, OpenSSL before 1.1.1).
     """
     import _ssl  # noqa: F401  (maps the libraries into the process)
 
-    if ssl.OPENSSL_VERSION.startswith("LibreSSL"):
-        raise UnsupportedOpenSSLError(
-            f"{ssl.OPENSSL_VERSION} is not supported; sslcontext needs OpenSSL 1.1.1 or 3.x"
-        )
     paths = _loaded_paths()
     linked = _linked_names(_ssl.__file__)
     ssl_path = _pick(paths, "libssl", linked)
@@ -149,7 +145,7 @@ def find_libraries() -> tuple[ctypes.CDLL, ctypes.CDLL]:
         raise UnsupportedOpenSSLError(
             f"found {crypto_path!r}, which is not the OpenSSL the ssl module reports"
         )
-    if ssl.OPENSSL_VERSION_INFO < (1, 1, 1):
+    if ssl.OPENSSL_VERSION_INFO < (1, 1, 1):  # LibreSSL reports 2.0.0
         raise UnsupportedOpenSSLError(
             f"{ssl.OPENSSL_VERSION} is too old; sslcontext needs OpenSSL 1.1.1 or later"
         )

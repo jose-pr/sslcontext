@@ -22,6 +22,8 @@ BytesOrText = Union[bytes, bytearray, memoryview, str]
 
 _SSL_CTRL_CHAIN = 88
 _SSL_CTRL_CHAIN_CERT = 89
+_SSL_CTRL_EXTRA_CHAIN_CERT = 14
+_SSL_CTRL_CLEAR_EXTRA_CHAIN_CERTS = 83
 _SSL_CTRL_SET_CLIENT_SIGALGS_LIST = 102
 # Client-authentication signatures a PKCS#1-only RSA key can still make.
 _NO_PSS_SIGALGS = (
@@ -71,10 +73,23 @@ def install(
     lib.ERR_clear_error()
     if not lib.SSL_CTX_use_certificate(pointer, certificate):
         raise CredentialError(f"certificate rejected: {drain_errors(lib)}")
-    lib.SSL_CTX_ctrl(pointer, _SSL_CTRL_CHAIN, 0, None)
-    for link in chain:
-        if not lib.SSL_CTX_ctrl(pointer, _SSL_CTRL_CHAIN_CERT, 1, link):
-            raise CredentialError(f"chain certificate rejected: {drain_errors(lib)}")
+    if lib.is_libressl:
+        # No per-certificate chains: the context's extra chain, which it owns.
+        lib.SSL_CTX_ctrl(pointer, _SSL_CTRL_CLEAR_EXTRA_CHAIN_CERTS, 0, None)
+        for link in chain:
+            lib.X509_up_ref(link)
+            if not lib.SSL_CTX_ctrl(pointer, _SSL_CTRL_EXTRA_CHAIN_CERT, 0, link):
+                lib.X509_free(link)
+                raise CredentialError(
+                    f"chain certificate rejected: {drain_errors(lib)}"
+                )
+    else:
+        lib.SSL_CTX_ctrl(pointer, _SSL_CTRL_CHAIN, 0, None)
+        for link in chain:
+            if not lib.SSL_CTX_ctrl(pointer, _SSL_CTRL_CHAIN_CERT, 1, link):
+                raise CredentialError(
+                    f"chain certificate rejected: {drain_errors(lib)}"
+                )
     if not lib.SSL_CTX_use_PrivateKey(pointer, key):
         errors = drain_errors(lib)
         if "key values mismatch" in errors:
@@ -183,8 +198,11 @@ def load_identity(context: ssl.SSLContext, identity: Identity) -> None:
                 install(lib, context, certificates[0], certificates[1:], key)
             finally:
                 lib.EVP_PKEY_free(key)
-            if record.key_type == "rsa" and not getattr(
-                identity.signer, "supports_pss", True
+            # LibreSSL negotiates TLS 1.2 without RSA-PSS: nothing to restrict.
+            if (
+                record.key_type == "rsa"
+                and not lib.is_libressl
+                and not getattr(identity.signer, "supports_pss", True)
             ):
                 _sign_without_pss(lib, context)
         except BaseException:

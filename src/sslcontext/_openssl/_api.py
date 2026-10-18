@@ -170,6 +170,21 @@ _SIGNATURES: dict[str, tuple[str, Any, tuple[Any, ...]]] = {
     "i2d_X509_NAME": ("crypto", c_int, (_P, _PP)),
     "X509_get_extended_key_usage": ("crypto", c_uint32, (_P,)),
     "X509_get_key_usage": ("crypto", c_uint32, (_P,)),
+    # LibreSSL: the engine's fields, the client-certificate callback
+    "SSL_CTX_set_client_cert_cb": ("ssl", None, (_P, _P)),
+    "SSL_get_SSL_CTX": ("ssl", _P, (_P,)),
+    "X509_up_ref": ("crypto", c_int, (_P,)),
+    "EVP_PKEY_up_ref": ("crypto", c_int, (_P,)),
+    "EVP_PKEY_get0_asn1": ("crypto", _P, (_P,)),
+    "EVP_PKEY_meth_free": ("crypto", None, (_P,)),
+    "ENGINE_init": ("crypto", c_int, (_P,)),
+    "EVP_PKEY_new": ("crypto", _P, ()),
+    "EVP_PKEY_set1_EC_KEY": ("crypto", c_int, (_P, _P)),
+    "EC_KEY_new_by_curve_name": ("crypto", _P, (c_int,)),
+    "EC_KEY_set_asn1_flag": ("crypto", None, (_P, c_int)),
+    "EC_KEY_generate_key": ("crypto", c_int, (_P,)),
+    "EC_KEY_free": ("crypto", None, (_P,)),
+    "ASN1_TIME_print": ("crypto", c_int, (_P, _P)),
 }
 
 
@@ -180,6 +195,13 @@ _V3_SYMBOLS = {
     "EVP_PKEY_size": "EVP_PKEY_get_size",
 }
 
+# LibreSSL keeps OpenSSL 1.0's names for the stack functions.
+_LIBRESSL_SYMBOLS = {
+    "OPENSSL_sk_num": "sk_num",
+    "OPENSSL_sk_value": "sk_value",
+    "OPENSSL_sk_free": "sk_free",
+}
+
 
 class OpenSSL:
     """The bound libraries plus what the glue needs to know about them."""
@@ -187,7 +209,13 @@ class OpenSSL:
     def __init__(self) -> None:
         self.libssl, self.libcrypto = find_libraries()
         self.version = ssl.OPENSSL_VERSION_INFO
-        self.is_v3 = self.version >= (3, 0)
+        # LibreSSL reports itself as version 2.0.0 to the ssl module.
+        self.is_libressl = ssl.OPENSSL_VERSION.startswith("LibreSSL")
+        self.is_v3 = self.version >= (3, 0) and not self.is_libressl
+        if self.is_libressl:
+            # A macro over SSL_CTX_ctrl(SSL_CTRL_OPTIONS) there.
+            self.SSL_CTX_get_options = lambda ctx: self.SSL_CTX_ctrl(ctx, 32, 0, None)
+            return
         # SSL_CTX_get_options returns uint64_t from 3.0, unsigned long before.
         options = self.libssl.SSL_CTX_get_options
         options.restype = c_uint64 if self.is_v3 else c_ulong
@@ -199,7 +227,12 @@ class OpenSSL:
             library, restype, argtypes = _SIGNATURES[name]
         except KeyError:
             raise AttributeError(f"{name} is not declared in _SIGNATURES") from None
-        symbol = _V3_SYMBOLS.get(name, name) if self.is_v3 else name
+        if self.is_v3:
+            symbol = _V3_SYMBOLS.get(name, name)
+        elif self.is_libressl:
+            symbol = _LIBRESSL_SYMBOLS.get(name, name)
+        else:
+            symbol = name
         function = getattr(self.libssl if library == "ssl" else self.libcrypto, symbol)
         function.restype = restype
         function.argtypes = list(argtypes)

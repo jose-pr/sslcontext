@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+import ssl
 import sys
 
 import pytest
@@ -88,13 +89,15 @@ def test_probe_reports_the_request_and_the_answer(capsys, tls_server, tmp_path):
         "--json",
     )
     result = json.loads(out)
-    assert status == 0, result
+    # TLS 1.3 finishes the handshake before the server refuses; 1.2 refuses in it.
+    assert status == (0 if ssl.HAS_TLSv1_3 else 1), result
     (request,) = result["certificate_requests"]
     assert request["authorities"] and request["host"] == "localhost"
     # The server-only certificate does not fit; two client ones do, so with
     # nothing to pick between them none is sent and the server refuses.
     assert len(request["candidates"]) == 2 and request["sent"] is None
-    assert result["server"]["subject"].startswith("CN=")
+    if ssl.HAS_TLSv1_3:  # 1.2 fails before the server's certificate is reported
+        assert result["server"]["subject"].startswith("CN=")
 
 
 def test_probe_lines_and_a_failed_connection(capsys):

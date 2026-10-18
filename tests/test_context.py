@@ -47,14 +47,17 @@ def test_server_default_does_not_ask_for_a_client_certificate():
     assert sslcontext.create_context("server").verify_mode == ssl.CERT_NONE
 
 
+TOP = ssl.TLSVersion.TLSv1_3 if ssl.HAS_TLSv1_3 else ssl.TLSVersion.TLSv1_2
+
+
 def test_versions_and_alpn_are_applied():
     context = sslcontext.create_context(
         minimum_version=ssl.TLSVersion.TLSv1_2,
-        maximum_version=ssl.TLSVersion.TLSv1_3,
+        maximum_version=TOP,
         alpn=["h2", "http/1.1"],
     )
     assert context.minimum_version == ssl.TLSVersion.TLSv1_2
-    assert context.maximum_version == ssl.TLSVersion.TLSv1_3
+    assert context.maximum_version == TOP
 
 
 def test_unknown_purpose_is_a_value_error():

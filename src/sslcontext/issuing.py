@@ -34,6 +34,7 @@ __all__ = ["CertificateAuthority", "IssuedCertificate"]
 
 _EVP_PKEY_RSA, _EVP_PKEY_EC = 6, 408
 _NID_PRIME256V1 = 415
+_OPENSSL_EC_NAMED_CURVE = 1
 # evp.h / ec.h / rsa.h controls; PARAMGEN|KEYGEN is 6 in OpenSSL 1.1.1 and 3.x.
 _OP_KEYGEN, _OP_PARAMGEN_KEYGEN = 4, 6
 _CTRL_EC_PARAMGEN_CURVE_NID = 0x1001
@@ -87,6 +88,8 @@ def _bio_bytes(lib: OpenSSL, write: "ctypes._CFuncPtr", *args: object) -> bytes:
 def _generate_key(lib: OpenSSL, key_type: str) -> int:
     if key_type not in ("ec", "rsa"):
         raise ValueError(f"key_type must be 'ec' or 'rsa', not {key_type!r}")
+    if key_type == "ec" and lib.is_libressl:
+        return _generate_ec_key_libressl(lib)
     kind = _EVP_PKEY_EC if key_type == "ec" else _EVP_PKEY_RSA
     context = lib.EVP_PKEY_CTX_new_id(kind, None)
     try:
@@ -119,6 +122,26 @@ def _generate_key(lib: OpenSSL, key_type: str) -> int:
     finally:
         if context:
             lib.EVP_PKEY_CTX_free(context)
+
+
+def _generate_ec_key_libressl(lib: OpenSSL) -> int:
+    # OpenSSL 1.0's EC keygen needs parameters first; and a key not marked as
+    # a named curve is written with explicit parameters, which verifiers refuse.
+    inner = lib.EC_KEY_new_by_curve_name(_NID_PRIME256V1)
+    key = lib.EVP_PKEY_new()
+    try:
+        lib.EC_KEY_set_asn1_flag(inner, _OPENSSL_EC_NAMED_CURVE)
+        if (
+            not inner
+            or not key
+            or lib.EC_KEY_generate_key(inner) != 1
+            or lib.EVP_PKEY_set1_EC_KEY(key, inner) != 1
+        ):
+            lib.EVP_PKEY_free(key)
+            raise SSLContextError(f"key generation failed: {drain_errors(lib)}")
+        return key  # type: ignore[no-any-return]
+    finally:
+        lib.EC_KEY_free(inner)
 
 
 def _san_and_constraints(names: Iterable[str]) -> List[str]:

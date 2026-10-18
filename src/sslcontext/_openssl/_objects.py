@@ -157,6 +157,21 @@ def _name_text(lib: OpenSSL, name: int) -> str:
 def _time(lib: OpenSSL, asn1_time: int) -> "datetime.datetime":
     import datetime
 
+    if lib.is_libressl:  # no ASN1_TIME_to_tm: "Mon DD HH:MM:SS YYYY GMT"
+        bio = lib.BIO_new(lib.BIO_s_mem())
+        try:
+            if not lib.ASN1_TIME_print(bio, asn1_time):
+                raise CredentialError(
+                    f"unreadable certificate date: {drain_errors(lib)}"
+                )
+            data = ctypes.c_void_p()
+            size = lib.BIO_ctrl(bio, _BIO_CTRL_INFO, 0, ctypes.byref(data))
+            text = ctypes.string_at(data.value, size).decode("ascii")
+        finally:
+            lib.BIO_free(bio)
+        return datetime.datetime.strptime(
+            " ".join(text.split()), "%b %d %H:%M:%S %Y GMT"
+        ).replace(tzinfo=datetime.timezone.utc)
     tm = (ctypes.c_int * 16)()  # struct tm, with room for platform extras
     if not lib.ASN1_TIME_to_tm(asn1_time, tm):
         raise CredentialError(f"unreadable certificate date: {drain_errors(lib)}")

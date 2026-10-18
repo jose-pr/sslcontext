@@ -534,9 +534,12 @@ All in `sslcontext.exceptions`, re-exported from the root.
 
 ## Gotchas
 
-- `sslcontext` drives the OpenSSL that the running interpreter's `ssl` module
-  loaded, through ctypes. It does not work with LibreSSL (Apple's
-  `/usr/bin/python3`) and needs OpenSSL 1.1.1 or later.
+- `sslcontext` drives the TLS library that the running interpreter's `ssl`
+  module loaded, through ctypes: OpenSSL 1.1.1 or later, or LibreSSL 2.8
+  (Apple's `/usr/bin/python3`). On LibreSSL there is no TLS 1.3 (so no
+  RSA-PSS), and a `ClientCertificateSelector` sees the server's CA names but
+  not its signature algorithms, sends the leaf without its chain, and is
+  not asked when the context already holds a loaded identity.
 - A selector, like a `choose` callback, runs inside the handshake on the
   thread doing it (in asyncio, the event loop's); the first request lists
   the sources, which can open a keystore. Listing is cached for

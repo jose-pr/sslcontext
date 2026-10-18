@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The `sslcontext` command (extra `cli`): `list` and `show` keystore
   identities, `probe URL` to see a server's certificate request, the
   candidates and the certificate sent.
+- Apple's `/usr/bin/python3` (LibreSSL 2.8) is supported: keystore
+  identities sign through it over TLS 1.2, and client certificates are
+  chosen when the server asks.
 - `system_context()`: a client context that behaves like the system's
   browser: OS verification through truststore (a dependency on Python 3.10+) and
   client certificates chosen when the server asks by a
