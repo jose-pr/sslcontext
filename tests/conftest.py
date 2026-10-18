@@ -1,0 +1,90 @@
+from __future__ import annotations
+
+import socket
+import ssl
+import threading
+from pathlib import Path
+from typing import Iterator, NamedTuple
+
+import pytest
+
+DATA = Path(__file__).parent / "data"
+
+
+def data(name: str) -> bytes:
+    return (DATA / name).read_bytes()
+
+
+class Handshake(NamedTuple):
+    client_cn: str
+    version: str
+
+
+class TLSServer:
+    """A loopback TLS server that requires a client certificate from the test CA.
+
+    For each connection it completes the handshake and answers with the
+    client certificate's common name and the negotiated protocol version.
+    """
+
+    def __init__(self) -> None:
+        self.context = ssl.create_default_context(
+            ssl.Purpose.CLIENT_AUTH, cafile=str(DATA / "ca.pem")
+        )
+        self.context.verify_mode = ssl.CERT_REQUIRED
+        self.context.load_cert_chain(DATA / "server.pem", DATA / "server.key")
+        self.errors: list[BaseException] = []
+        self._listener = socket.create_server(("127.0.0.1", 0))
+        self._listener.settimeout(0.2)
+        self.port = self._listener.getsockname()[1]
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+
+    def __enter__(self) -> TLSServer:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self._stop.set()
+        self._thread.join(5)
+        self._listener.close()
+
+    def _serve(self) -> None:
+        while not self._stop.is_set():
+            try:
+                raw, _ = self._listener.accept()
+            except socket.timeout:
+                continue
+            raw.settimeout(5)
+            try:
+                with self.context.wrap_socket(raw, server_side=True) as tls:
+                    subject = dict(item[0] for item in tls.getpeercert()["subject"])
+                    tls.sendall(f"{subject['commonName']}\n{tls.version()}".encode())
+            except (OSError, ssl.SSLError) as error:
+                self.errors.append(error)
+                raw.close()
+
+    def handshake(self, context: ssl.SSLContext) -> Handshake:
+        """Connect with ``context`` and return what the server saw."""
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as raw:
+            with context.wrap_socket(raw, server_hostname="localhost") as tls:
+                reply = b""
+                while True:
+                    chunk = tls.recv(1024)
+                    if not chunk:
+                        break
+                    reply += chunk
+        cn, version = reply.decode().split("\n")
+        return Handshake(cn, version)
+
+
+@pytest.fixture
+def tls_server() -> Iterator[TLSServer]:
+    with TLSServer() as server:
+        yield server
+
+
+@pytest.fixture
+def client_context() -> ssl.SSLContext:
+    """A client context trusting the test CA and holding no identity yet."""
+    return ssl.create_default_context(cafile=str(DATA / "ca.pem"))
