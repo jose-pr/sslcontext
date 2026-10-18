@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sslcontext"
+version = "2.0.0.dev0"
+authors = [{ name = "Jose A." }]
+description = "Client identities from OS keystores (Windows CNG, PKCS#11, macOS Keychain) in a standard ssl.SSLContext"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Topic :: Security :: Cryptography",
+    "Typing :: Typed",
+    # No license chosen yet: PyPI rejects this classifier, so nothing can be uploaded.
+    "Private :: Do Not Upload",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["black", "build", "pytest"]
+docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
+
+[project.urls]
+Homepage = "https://github.com/jose-pr/sslcontext/"
+Documentation = "https://jose-pr.github.io/sslcontext/"
+Issues = "https://github.com/jose-pr/sslcontext/issues"
+
+# Personal overrides, agent config and the contributor AGENTS.md never ship;
+# src/sslcontext/AGENTS.md (the API header) does.
+[tool.hatch.build.targets.sdist]
+exclude = ["/.*", "/AGENTS.md", "/benchmarks", "*.local.*", "CLAUDE*"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sslcontext"]
+exclude = ["*.local.*", "CLAUDE*"]
+
+[tool.black]
+target-version = ["py39"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+filterwarnings = ["error"]
+markers = [
+    "integration: talks to a real OS keystore and changes it for the duration of the test",
+]
