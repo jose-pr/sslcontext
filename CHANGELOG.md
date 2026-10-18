@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `system_context()`: a client context that behaves like the system's
+  browser: OS verification through truststore (extra `system`) and
+  client certificates chosen when the server asks by a
+  `ClientCertificateSelector` over `system_sources()` (the Windows
+  Personal store, the default PKCS#11 module elsewhere), filtered as a
+  browser filters (validity, client-authentication usage, key type, the
+  CAs the server names) and picked by remembered choice, `AutoSelectRule`
+  rules, the Edge/Chrome/Chromium `AutoSelectCertificateForUrls` policy
+  (`browser_policies()`), a `choose` callback or the only candidate.
 - `create_context()` builds a verifying `ssl.SSLContext` from
   `verify`/`cafile`/`capath`/`cadata`, TLS version bounds and ALPN.
 - `load_pem()` and `load_pkcs12()` load a certificate, chain and key from

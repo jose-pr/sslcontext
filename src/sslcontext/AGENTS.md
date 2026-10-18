@@ -11,7 +11,8 @@ Import everything from the root `sslcontext`, except the errors, which live in
 backends (`sslcontext.backends`) and the test helpers (`sslcontext.testing`).
 Modules whose names start with `_` are private.
 
-`pip install sslcontext`. No runtime dependencies.
+`pip install sslcontext`. No runtime dependencies; the extra `system` adds
+`truststore` (Python 3.10+) for `system_context()`'s OS verification.
 
 `sslcontext.__version__` is the installed distribution's version.
 
@@ -42,6 +43,122 @@ combining it with `cafile`/`capath` is a `ValueError`. Trust comes from
 `cafile`/`capath`/`cadata` when given, else the platform's default store.
 
 `VerifyLike` is the exported alias for the `verify` type.
+
+## The system's context: OS trust and browser-like client certificates (`sslcontext`)
+
+```python
+def system_context(*, selector: ClientCertificateSelector | bool | None = None,
+                   pin: PinSource = None, verify=None, cafile=None, capath=None,
+                   cadata=None, minimum_version=None, maximum_version=None,
+                   alpn=None) -> ssl.SSLContext
+def system_selector(*, pin: PinSource = None, choose: Chooser | None = None,
+                    rules: Iterable[AutoSelectRule] = (), browser_policy: bool = True,
+                    remember: bool = True, cache_ttl: float = 60.0
+                    ) -> ClientCertificateSelector
+def system_sources(*, pin: PinSource = None) -> list[Backend]
+```
+
+`system_context()` is a client context that behaves like the system's
+browser. Servers are verified by the operating system (a
+`truststore.SSLContext`: CryptoAPI on Windows, the Security framework on
+macOS) when the `system` extra is installed, else by OpenSSL over the default
+store; `verify`/`cafile`/`capath`/`cadata` replace that trust exactly as for
+`create_context`. When a server asks for a client certificate, `selector`
+answers (default `system_selector(pin=pin)`; `False`: never send one).
+`post_handshake_auth` is on. Nothing is opened until a server asks; one
+context serves every server and every thread, so share it (urllib3 keys its
+pools by context). `system_sources()`: Windows `CNGBackend("MY")` (smart-card
+certificates appear there while the card is inserted); elsewhere
+`PKCS11Backend()` when its default module exists (p11-kit's proxy on Linux),
+else `[]`. macOS has no Keychain source yet.
+
+```python
+class ClientCertificateSelector:
+    def __init__(self, sources: Iterable[IdentitySource], *, choose: Chooser | None = None,
+                 rules: Iterable[AutoSelectRule] = (), browser_policy: bool = False,
+                 remember: bool = True, cache_ttl: float = 60.0)
+    def install(self, context: ssl.SSLContext) -> None   # client contexts; replaces a previous one
+    def candidates(self, request: CertificateRequest) -> list[Identity]
+    def select(self, request: CertificateRequest) -> Identity | None
+    def identities(self) -> list[Identity]               # every source, cached cache_ttl s
+    def policies(self) -> tuple[AutoSelectRule, ...]     # browser rules, cached; () unless browser_policy
+    def refresh(self) -> None                            # list sources and policies again
+    def forget(self, host: str | None = None) -> None    # drop remembered choices
+
+IdentitySource = Backend | Identity | Callable[[], Iterable[Identity]]
+Chooser = Callable[[CertificateRequest, list[Identity]], Identity | None]
+
+@dataclass(frozen=True)
+class CertificateRequest:
+    host: str | None                  # the SNI the client sent
+    authorities: tuple[str, ...]      # RFC 4514 names of acceptable CAs; () = any
+    authorities_der: tuple[bytes, ...]
+    key_types: frozenset[str]         # "rsa" / "ec" the server's signature algorithms allow
+    rsa_pss_required: bool            # TLS 1.3, or no PKCS#1 offered
+    tls_version: str                  # "TLSv1.3", "TLSv1.2", ...
+```
+
+The selector answers each certificate request during the handshake, on that
+connection only. Candidates are what a browser offers: valid now; no
+extended key usage, `clientAuth` or `anyExtendedKeyUsage`, and
+`digitalSignature` when key usage is present; a key type in `key_types` (an
+RSA key whose signer has `supports_pss == False` is left out when PSS is
+required); issued under a named authority (the leaf's issuer, or any subject
+or issuer in its chain) when the server names any. Newest expiry first. The
+choice, in order: the identity remembered for the host (when still a
+candidate), the first `rules` entry matching the host with a matching
+candidate, the same over `browser_policies()` when `browser_policy`, then
+`choose(request, candidates)`; with no `choose`, the only candidate when
+there is exactly one. Otherwise no certificate is sent (logged at INFO) and
+an identity loaded with `load_identity` (if any) is sent instead, else none;
+the server decides. A source that raises `KeystoreError`/`OSError` while
+listing is logged at WARNING and skipped; an identity whose certificate or
+key cannot be examined is skipped. An exception from `choose`, or a result
+that is not one of the candidates, fails that handshake (`ssl.SSLError`,
+logged at WARNING). `install` keeps the selector alive as long as the
+context. Sources are listed at most every `cache_ttl` seconds.
+
+```python
+@dataclass(frozen=True)
+class AutoSelectRule:
+    pattern: str
+    issuer: str | Mapping[str, str] | None = None
+    subject: str | Mapping[str, str] | None = None
+    def matches_host(self, host: str | None) -> bool
+    def matches(self, identity: Identity) -> bool
+
+def browser_policies() -> list[AutoSelectRule]
+def rules_from_policy(entries: Iterable[str | Mapping]) -> list[AutoSelectRule]
+```
+
+`AutoSelectRule` is Chrome's and Edge's `AutoSelectCertificateForUrls` entry:
+`pattern` `example.com` (that host), `[*.]example.com` (it and subdomains),
+`*.example.com` (subdomains), `*` (any); a scheme, port or path in it is
+ignored (the request knows only the host). `issuer`/`subject`: a mapping of
+RFC 4514 attributes to exact values (`{"CN": "Corp CA", "OU": "Staff"}`), or
+a string matched case-insensitively inside the whole name.
+`browser_policies()` reads the policy set for Edge, Chrome and Chromium:
+Windows registry (`HKLM` then `HKCU`, `SOFTWARE\Policies\{Microsoft\Edge,
+Google\Chrome,Chromium}\AutoSelectCertificateForUrls`, values in numeric
+order), Linux `/etc/opt/{edge,chrome}/policies/managed/*.json` and
+`/etc/chromium/policies/managed/*.json`, macOS `/Library/Managed
+Preferences/[<user>/]{com.microsoft.Edge,com.google.Chrome,
+org.chromium.Chromium}.plist`. `rules_from_policy` parses entries
+(`{"pattern": ..., "filter": {"ISSUER": {...}, "SUBJECT": {...}}}`, as JSON
+text or objects); a malformed entry is skipped, as the browsers skip it.
+
+```python
+import sslcontext, urllib.request
+
+ctx = sslcontext.system_context()      # share it
+urllib.request.urlopen("https://intranet.example", context=ctx)
+
+selector = sslcontext.system_selector(
+    rules=[sslcontext.AutoSelectRule("[*.]corp.example", issuer={"CN": "Corp CA"})],
+    choose=lambda request, candidates: candidates[0],   # instead of a dialog
+)
+ctx = sslcontext.system_context(selector=selector)
+```
 
 ## Loading credentials from memory (`sslcontext`)
 
@@ -75,7 +192,8 @@ or a key that does not match the certificate, and `TypeError` when `context`
 is not an `ssl.SSLContext`. An identity of one key type (RSA, EC) replaces a
 previously loaded identity of the same type; identities of different types
 coexist and OpenSSL picks per handshake. `BytesOrText` is the exported alias
-for the credential argument types.
+for the credential argument types. Every loader (and `install`) configures
+a `truststore.SSLContext` through the inner context its connections use.
 
 ## Keystore identities (`sslcontext`)
 
@@ -392,6 +510,10 @@ All in `sslcontext.exceptions`, re-exported from the root.
 - `sslcontext` drives the OpenSSL that the running interpreter's `ssl` module
   loaded, through ctypes. It does not work with LibreSSL (Apple's
   `/usr/bin/python3`) and needs OpenSSL 1.1.1 or later.
+- A selector, like a `choose` callback, runs inside the handshake on the
+  thread doing it (in asyncio, the event loop's); the first request lists
+  the sources, which can open a keystore. Listing is cached for
+  `cache_ttl`; call `identities()` beforehand to warm it.
 - PIN callbacks, and with `KEYSTORE_PROMPT` the keystore's own dialogs, run
   inside the TLS handshake on the thread doing it; in asyncio a callback that
   waits for a person blocks the event loop. Without either, nothing waits.

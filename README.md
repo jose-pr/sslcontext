@@ -23,6 +23,11 @@ compiled extension. Documentation: <https://jose-pr.github.io/sslcontext/>.
 - **Never blocks on a PIN** — PINs and passwords come from a value or a
   callback you write; with none, operations fail at once. Keystore dialogs
   and PIN pads are opt-in.
+- **The system's context** — `system_context()`: the OS verifies servers
+  (truststore) and, when a server asks, the client certificate is chosen
+  as the browser would: from the system's keystores, matching the CAs the
+  server names, following Edge's and Chrome's `AutoSelectCertificateForUrls`
+  policy, your rules or your callback, and never blocking.
 - **One context builder** — `create_context()` for the verify/cafile/capath
   combinations every HTTP client reimplements.
 
@@ -36,10 +41,23 @@ compiled extension. Documentation: <https://jose-pr.github.io/sslcontext/>.
 ## Installation
 
 ```bash
-pip install sslcontext
+pip install sslcontext            # no dependencies
+pip install "sslcontext[system]"  # + truststore: the OS verifies servers
 ```
 
 ## Quick start
+
+Behave like the system's browser: the OS verifies the server, and when a
+server asks for a client certificate the matching one is chosen from the
+system's keystores. Build it once and share it:
+
+```python
+import urllib.request
+import sslcontext
+
+ctx = sslcontext.system_context()
+urllib.request.urlopen("https://intranet.example.com/", context=ctx)
+```
 
 Load a certificate and key held in memory:
 
@@ -82,7 +100,7 @@ sslcontext.load_identity(ctx, card.find_identity(subject="alice"))
 
 | Module | Purpose |
 | --- | --- |
-| `sslcontext` | context builder, identity loading, the `Signer` contract |
+| `sslcontext` | context builders (`system_context`, `create_context`), identity loading, client certificate selection, the `Signer` contract |
 | `sslcontext.backends` | keystore backends and their registry |
 | `sslcontext.issuing` | a local certificate authority issuing server certificates |
 | `sslcontext.testing` | `SoftwareSigner`, an in-memory signer for tests |
