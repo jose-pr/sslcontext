@@ -290,9 +290,9 @@ class ClientCertificateSelector:
                 usage == _ABSENT or bool(usage & (_XKU_SSL_CLIENT | _XKU_ANYEKU))
             ) and (key_usage == _ABSENT or bool(key_usage & _KU_DIGITAL_SIGNATURE))
             names = {_name_der(lib, lib.X509_get_issuer_name(leaf))}
-            for link in certificates[1:]:
-                names.add(_name_der(lib, lib.X509_get_subject_name(link)))
-                names.add(_name_der(lib, lib.X509_get_issuer_name(link)))
+            for pointer in certificates[1:]:
+                names.add(_name_der(lib, lib.X509_get_subject_name(pointer)))
+                names.add(_name_der(lib, lib.X509_get_issuer_name(pointer)))
             prepared = _Prepared(identity, client_auth, frozenset(names), certificates)
             self._prepared[key] = prepared
             return prepared
