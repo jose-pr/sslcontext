@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import ssl
 import sys
+import warnings
 from typing import TYPE_CHECKING, Iterable, List, Optional, Union
 
 from ._context import VerifyLike, create_context
@@ -60,10 +61,16 @@ def system_selector(
 
 
 def _truststore() -> Optional[type]:
-    try:
-        import truststore
-    except ImportError:
-        return None
+    # truststore's import wraps a probe SSLObject without a host name, which
+    # Python 3.10's later patch releases report as a DeprecationWarning.
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore", "check_hostname requires server_hostname", DeprecationWarning
+        )
+        try:
+            import truststore
+        except ImportError:
+            return None
     return truststore.SSLContext  # type: ignore[no-any-return]
 
 
