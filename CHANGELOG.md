@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [2.0.0] - 2026-10-19
+
 ### Added
 
 - The `sslcontext` command (extra `cli`): `list` and `show` keystore
@@ -78,4 +82,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `openssl-engine` and `openssl-engine-capi` are superseded: OpenSSL 4 removed
   the ENGINE API they were built on.
 
-[Unreleased]: https://github.com/jose-pr/sslcontext/commits/main
+[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/jose-pr/sslcontext/releases/tag/v2.0.0
