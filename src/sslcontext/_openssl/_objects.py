@@ -75,6 +75,11 @@ def read_private_key(lib: OpenSSL, data: bytes, password: bytes | None) -> int:
             key = lib.PEM_read_bio_PrivateKey(bio, None, None, password or b"")
         else:
             key = lib.d2i_PrivateKey_bio(bio, None)
+    if not key and password is not None and _PEM_ANY not in data:
+        # DER has no header saying it is encrypted: try encrypted PKCS#8.
+        lib.ERR_clear_error()
+        with _MemoryBIO(lib, data) as bio:
+            key = lib.d2i_PKCS8PrivateKey_bio(bio, None, None, password)
     if not key:
         raise CredentialError(f"cannot read the private key: {drain_errors(lib)}")
     return key

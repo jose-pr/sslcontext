@@ -12,7 +12,8 @@ from ._openssl import _keys
 from ._openssl._errors import drain_errors
 from ._openssl._objects import read_certificates, read_pkcs12, read_private_key
 from ._openssl._signing import make_private_key
-from ._pin import PasswordSource, resolve_password
+from ._asn1 import is_pkcs12
+from ._pin import PasswordSource, deferred, resolve_password
 from ._sources import CertificatesLike, KeyLike, read_source, read_sources
 from .exceptions import CredentialError
 
@@ -38,7 +39,7 @@ def read_key_with(lib: OpenSSL, data: bytes, password: PasswordSource) -> int:
     A callable is not called for an unencrypted key, so it never prompts
     needlessly; when it gives nothing, an encrypted key fails at once.
     """
-    if not callable(password):
+    if not deferred(password):
         return read_private_key(lib, data, resolve_password(password))
     try:
         return read_private_key(lib, data, None)
@@ -108,18 +109,28 @@ def load_pem(
     holding them in order, one DER certificate, or a list of sources (each
     PEM or DER) in that order, in any form :data:`CertificatesLike` names
     (text, bytes, paths, objects with ``open()``, ``cryptography``
-    certificates). ``key`` is a PEM or DER private key, likewise, or a
-    ``cryptography`` private key; when omitted it is read from the first
-    certificate source, which then holds both. ``password`` (a value, or a
-    callable asked only if the key turns out encrypted) decrypts an encrypted
-    key. Nothing is written to disk.
+    certificates). It may instead be one PKCS#12 bundle (``.p12``/``.pfx``),
+    loaded as :func:`load_pkcs12` loads it, with no ``key``. ``key`` is a
+    PEM or DER private key (DER: PKCS#8, encrypted or not, or traditional),
+    likewise, or a ``cryptography`` private key; when omitted it is read from
+    the first certificate source, which then holds both. ``password`` (a
+    value, or a callable asked only if the key or bundle turns out
+    encrypted) decrypts it. Nothing is written to disk.
 
     Raises :class:`CredentialError` for malformed data, a wrong password, or a
     key that does not match the certificate; ``OSError`` when a named file
     cannot be read.
     """
-    lib = openssl()
     blobs = read_sources(certificate, "certificate")
+    if any(is_pkcs12(blob) for blob in blobs):
+        if len(blobs) != 1 or key is not None:
+            raise ValueError(
+                "a PKCS#12 bundle holds its own key and chain: pass it alone, "
+                "without key"
+            )
+        load_pkcs12(context, blobs[0], password)
+        return
+    lib = openssl()
     key_data = blobs[0] if key is None else read_source(key, "key")
     certificates: list = []
     try:
@@ -148,7 +159,7 @@ def load_pkcs12(
     """
     data = read_source(data, "data")
     lib = openssl()
-    if callable(password):
+    if deferred(password):
         try:
             key, certificate, chain = read_pkcs12(lib, bytes(data), None)
         except CredentialError:

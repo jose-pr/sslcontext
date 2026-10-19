@@ -44,6 +44,7 @@ _SIGNATURES: dict[str, tuple[str, Any, tuple[Any, ...]]] = {
     "PEM_read_bio_PrivateKey": ("crypto", _P, (_P, _P, _P, c_char_p)),
     "d2i_X509_bio": ("crypto", _P, (_P, _P)),
     "d2i_PrivateKey_bio": ("crypto", _P, (_P, _P)),
+    "d2i_PKCS8PrivateKey_bio": ("crypto", _P, (_P, _P, _P, c_char_p)),
     "d2i_PKCS12_bio": ("crypto", _P, (_P, _P)),
     "i2d_X509": ("crypto", c_int, (_P, _PP)),
     "CRYPTO_free": ("crypto", None, (_P, c_char_p, c_int)),

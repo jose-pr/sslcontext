@@ -9,6 +9,7 @@ __all__ = [
     "DIGEST_INFO_PREFIX",
     "certificate_usages",
     "ecdsa_der",
+    "is_pkcs12",
 ]
 
 # RFC 8017 section 9.2, note 1: DER of DigestInfo up to the digest bytes.
@@ -102,3 +103,16 @@ def certificate_usages(der: bytes) -> tuple:
                 octets = der[bits_start + 1 : bits_end]  # after the unused-bits count
                 usage = sum(octet << (8 * i) for i, octet in enumerate(octets[:2]))
     return extended, usage
+
+
+def is_pkcs12(data: bytes) -> bool:
+    """Whether DER ``data`` is a PKCS#12 bundle: ``SEQUENCE { INTEGER 3, ... }``
+    (a certificate's SEQUENCE starts with another SEQUENCE)."""
+    try:
+        tag, start, _ = _element(data, 0)
+        if tag != 0x30:
+            return False
+        inner, inner_start, inner_end = _element(data, start)
+    except (IndexError, ValueError):
+        return False
+    return inner == 0x02 and data[inner_start:inner_end] == b"\x03"

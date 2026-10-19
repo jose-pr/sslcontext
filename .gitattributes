@@ -6,3 +6,4 @@
 
 # Test credentials stored as DER bytes.
 *.p12 binary
+*.der binary

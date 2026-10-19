@@ -9,8 +9,9 @@ dialog, a PIN pad) is used only when the caller returns or passes
 from __future__ import annotations
 
 import enum
+import os
 from dataclasses import dataclass
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 __all__ = [
     "KEYSTORE_PROMPT",
@@ -63,8 +64,12 @@ PinSource = Union[str, Prompt, PinCallback, None]
 """A PIN, :data:`KEYSTORE_PROMPT`, a :data:`PinCallback`, or ``None`` (no PIN:
 fail instead of asking anyone)."""
 
-PasswordSource = Union[str, bytes, Callable[[], Union[str, bytes, None]], None]
-"""A password, a callable returning one (or ``None`` to decline), or ``None``."""
+PasswordSource = Union[
+    str, bytes, "os.PathLike[str]", Any, Callable[[], Union[str, bytes, None]], None
+]
+"""A password (``str`` or ``bytes``), a file holding it (``os.PathLike``, or
+an object with ``open()`` or ``read()``: its first line, without the line
+ending), a callable returning one (or ``None`` to decline), or ``None``."""
 
 
 def resolve_pin(source: PinSource, request: PinRequest) -> Union[str, Prompt, None]:
@@ -90,12 +95,32 @@ def resolve_pin(source: PinSource, request: PinRequest) -> Union[str, Prompt, No
     return answer
 
 
+def _is_file(source: Any) -> bool:
+    return isinstance(source, os.PathLike) or any(
+        callable(getattr(source, name, None)) for name in ("open", "read")
+    )
+
+
+def deferred(source: PasswordSource) -> bool:
+    """Whether ``source`` is consulted only when a password turns out needed."""
+    return callable(source) or _is_file(source)
+
+
 def resolve_password(source: PasswordSource) -> Optional[bytes]:
     """The password ``source`` gives, as bytes; ``None`` means none."""
-    if callable(source):
+    if callable(source) and not _is_file(source):
         source = source()
     if source is None or isinstance(source, bytes):
         return source
+    if isinstance(source, (bytearray, memoryview)):
+        return bytes(source)
     if isinstance(source, str):
         return source.encode("utf-8")
-    raise TypeError(f"a password must be str or bytes, not {type(source).__name__}")
+    if _is_file(source):
+        from ._sources import read_source
+
+        line = read_source(source, "password").split(b"\n", 1)[0]
+        return line[:-1] if line.endswith(b"\r") else line
+    raise TypeError(
+        f"a password must be str, bytes, a file or a callable, not {type(source).__name__}"
+    )

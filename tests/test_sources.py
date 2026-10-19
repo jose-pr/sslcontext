@@ -124,3 +124,123 @@ def test_wrong_uses_are_refused():
         sslcontext.create_context(ca=[])
     with pytest.raises(TypeError, match="not int"):
         sslcontext.create_context(ca=42)
+
+
+@pytest.mark.parametrize(
+    "bundle",
+    [DATA / "client-rsa.p12", str(DATA / "client-rsa.p12"), data("client-rsa.p12")],
+    ids=["pathlike", "str-path", "bytes"],
+)
+def test_a_pkcs12_bundle_is_a_certificate(tls_server, bundle):
+    context = sslcontext.create_context(ca=CA, certificate=bundle, password="test")
+    assert tls_server.handshake(context).client_cn == "client-rsa"
+
+
+def test_a_pkcs12_password_callback_and_the_system_context(tls_server):
+    asked = []
+
+    def password():
+        asked.append(1)
+        return "test"
+
+    context = sslcontext.system_context(
+        ca=CA, certificate=DATA / "client-rsa.p12", password=password
+    )
+    assert tls_server.handshake(context).client_cn == "client-rsa"
+    assert asked == [1]
+
+
+def test_pkcs12_misuse_is_refused():
+    with pytest.raises(sslcontext.CredentialError, match="wrong password"):
+        sslcontext.create_context(certificate=DATA / "client-rsa.p12", password="no")
+    with pytest.raises(ValueError, match="PKCS#12"):
+        sslcontext.create_context(
+            certificate=DATA / "client-rsa.p12", key=DATA / "client-rsa.key"
+        )
+    with pytest.raises(ValueError, match="PKCS#12"):
+        sslcontext.create_context(
+            certificate=[DATA / "client-rsa.p12", DATA / "ca.pem"], password="test"
+        )
+
+
+def test_an_encrypted_der_key_takes_the_password(tls_server):
+    context = sslcontext.create_context(
+        ca=CA,
+        certificate=DATA / "client-ec.pem",
+        key=DATA / "client-ec.enc.der",
+        password="test",
+    )
+    assert tls_server.handshake(context).client_cn == "client-ec"
+    for wrong in (None, "no"):
+        with pytest.raises(sslcontext.CredentialError):
+            sslcontext.create_context(
+                certificate=DATA / "client-ec.pem",
+                key=DATA / "client-ec.enc.der",
+                password=wrong,
+            )
+
+
+def test_a_plain_der_key_never_asks_for_a_password(tls_server):
+    context = sslcontext.create_context(
+        ca=CA,
+        certificate=DATA / "client-ec.pem",
+        key=DATA / "client-ec.der",
+        password=lambda: pytest.fail("asked for a password"),
+    )
+    assert tls_server.handshake(context).client_cn == "client-ec"
+
+
+class _Reader:
+    def __init__(self, data):
+        self.data = data
+        self.reads = 0
+
+    def read(self):
+        self.reads += 1
+        return self.data
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda tmp: tmp / "pw.txt",
+        lambda tmp: str(tmp / "pw.txt"),
+        lambda tmp: _Opener(tmp / "pw.txt"),
+        lambda tmp: _Reader(b"test\r\nsecond line ignored\n"),
+        lambda tmp: b"test",
+        lambda tmp: bytearray(b"test"),
+    ],
+    ids=["pathlike", "str-is-the-password", "opener", "reader", "bytes", "bytearray"],
+)
+def test_passwords_from_values_and_files(tls_server, tmp_path, make):
+    (tmp_path / "pw.txt").write_bytes(b"test\n")
+    source = make(tmp_path)
+    if isinstance(source, str):  # a str is always the password itself
+        with pytest.raises(sslcontext.CredentialError):
+            sslcontext.create_context(
+                certificate=DATA / "client-rsa.p12", password=source
+            )
+        return
+    for certificate, key in (
+        (DATA / "client-rsa.p12", None),
+        (DATA / "client-ec.pem", DATA / "client-ec.enc.der"),
+        (DATA / "client-ec.pem", DATA / "client-ec.enc.key"),
+    ):
+        context = sslcontext.create_context(
+            ca=CA, certificate=certificate, key=key, password=source
+        )
+        assert tls_server.handshake(context).client_cn in ("client-rsa", "client-ec")
+
+
+def test_a_password_file_is_read_only_when_needed():
+    reader = _Reader(b"test")
+    sslcontext.create_context(
+        certificate=DATA / "client-ec.pem", key=DATA / "client-ec.key", password=reader
+    )
+    assert reader.reads == 0
+    sslcontext.create_context(
+        certificate=DATA / "client-ec.pem",
+        key=DATA / "client-ec.enc.key",
+        password=reader,
+    )
+    assert reader.reads == 1
