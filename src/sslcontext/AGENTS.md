@@ -216,10 +216,17 @@ def load_pem(
 
 Makes `certificate` (+ chain) and `key` the context's identity; nothing is
 written to disk. `certificate` is the leaf then its chain: PEM holding them
-in order, one DER certificate, or a list of sources in that order. `key` is
-a PEM or DER private key (or a `cryptography` key); omitted, it is read from
-the first certificate source (a combined PEM). `password` decrypts an
-encrypted key; see [PINs and passwords](#pins-and-passwords-sslcontext).
+in order, one DER certificate, or a list of sources in that order; or one
+PKCS#12 bundle (`.p12`/`.pfx`, recognised by its DER shape, whatever the file
+is called), loaded as `load_pkcs12` loads it, with `password` and without
+`key` (a `key`, or a bundle in a list, is a `ValueError`). `key` is a PEM or
+DER private key (DER: PKCS#8, encrypted or not, or the traditional RSA/EC
+form) or a `cryptography` key; omitted, it is read from the first
+certificate source (a combined PEM). `password` decrypts an encrypted key or
+bundle; see [PINs and passwords](#pins-and-passwords-sslcontext).
+`create_context(certificate=..., password=...)` and `system_context` take the
+same, so `create_context(certificate="client.p12", password="...")` is an
+mTLS context.
 
 ```python
 def load_pkcs12(
@@ -330,7 +337,7 @@ class PinRequest:
 
 PinCallback = Callable[[PinRequest], str | Prompt | None]
 PinSource = str | Prompt | PinCallback | None
-PasswordSource = str | bytes | Callable[[], str | bytes | None] | None
+PasswordSource = str | bytes | os.PathLike | <has open()> | <has read()> | Callable[[], str | bytes | None] | None
 ```
 
 A backend's `pin=` takes a `PinSource`: the PIN; `KEYSTORE_PROMPT`; a
@@ -346,10 +353,13 @@ handshake (or the listing) and propagates from `identities()`. A callback
 returning anything else raises `TypeError` (the message never includes the
 value). `PinRequest` never holds a PIN.
 
-Loaders take a `PasswordSource` for encrypted keys: a value, or a callable
-that is called only if the key turns out to be encrypted (returning `None`
-fails with `CredentialError`). OpenSSL's terminal passphrase prompt is never
-used.
+Loaders take a `PasswordSource` for encrypted keys and PKCS#12 bundles: the
+password as `str` (UTF-8) or `bytes` (a `str` is always the password itself,
+never a path); a file holding it (`os.PathLike`, or an object with `open()`
+or `read()`: its first line, without the line ending, as OpenSSL's `-passin
+file:` reads it); or a callable. A file or callable is consulted only if the
+key turns out to be encrypted (a callable returning `None` fails with
+`CredentialError`). OpenSSL's terminal passphrase prompt is never used.
 
 ```python
 def ask(request: sslcontext.PinRequest):
@@ -591,7 +601,7 @@ All in `sslcontext.exceptions`, re-exported from the root.
 | Class | Bases | Raised when |
 | --- | --- | --- |
 | `SSLContextError` | `Exception` | base of everything below |
-| `UnsupportedOpenSSLError` | `SSLContextError` | the interpreter's OpenSSL cannot be driven: LibreSSL, OpenSSL < 1.1.1, a static `_ssl` that hides its symbols, or an unrecognised `SSLContext` layout |
+| `UnsupportedOpenSSLError` | `SSLContextError` | the interpreter's TLS library cannot be driven: OpenSSL < 1.1.1, a static `_ssl` that hides its symbols, or an unrecognised `SSLContext` or LibreSSL structure layout |
 | `CredentialError` | `SSLContextError`, `ValueError` | malformed certificate/key, wrong password, key/certificate mismatch |
 | `IdentityNotFoundError` | `SSLContextError`, `LookupError` | no keystore entry matched a query |
 | `KeystoreError` | `SSLContextError`, `OSError` | the keystore refused or failed an operation |

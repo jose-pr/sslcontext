@@ -23,6 +23,11 @@ Nothing yet.
 - On Python 3.9, where truststore is unavailable, `system_context()` on macOS
   trusts the Keychain's anchors (system roots, and those an administrator or
   the user trusted) in addition to OpenSSL's default store.
+- A PKCS#12 bundle (`.p12`/`.pfx`) is accepted wherever a certificate is
+  (`certificate=`, `load_pem()`), decrypted with `password=`; encrypted DER
+  (PKCS#8) private keys are decrypted with `password=` as PEM ones are.
+- A password may be `bytes`, or a file holding it (a path object, or anything
+  with `open()` or `read()`; its first line), read only when needed.
 - `create_context()` and `system_context()` take `ca=`, `certificate=`,
   `key=`, `password=` and `identity=`. Every certificate, key, CA and
   bundle argument (including `load_pem()` and `load_pkcs12()`) accepts PEM
