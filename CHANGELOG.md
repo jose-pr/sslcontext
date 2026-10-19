@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 Nothing yet.
 
+## [2.1.0] - 2026-10-19
+
+### Added
+
+- A PKCS#12 bundle (`.p12`/`.pfx`) is accepted wherever a certificate is
+  (`certificate=`, `load_pem()`), decrypted with `password=`; encrypted DER
+  (PKCS#8) private keys are decrypted with `password=` as PEM ones are.
+- A password may be `bytes`, or a file holding it (a path object, or anything
+  with `open()` or `read()`; its first line), read only when needed.
+
 ## [2.0.0] - 2026-10-19
 
 ### Added
@@ -23,11 +33,6 @@ Nothing yet.
 - On Python 3.9, where truststore is unavailable, `system_context()` on macOS
   trusts the Keychain's anchors (system roots, and those an administrator or
   the user trusted) in addition to OpenSSL's default store.
-- A PKCS#12 bundle (`.p12`/`.pfx`) is accepted wherever a certificate is
-  (`certificate=`, `load_pem()`), decrypted with `password=`; encrypted DER
-  (PKCS#8) private keys are decrypted with `password=` as PEM ones are.
-- A password may be `bytes`, or a file holding it (a path object, or anything
-  with `open()` or `read()`; its first line), read only when needed.
 - `create_context()` and `system_context()` take `ca=`, `certificate=`,
   `key=`, `password=` and `identity=`. Every certificate, key, CA and
   bundle argument (including `load_pem()` and `load_pkcs12()`) accepts PEM
@@ -87,5 +92,6 @@ Nothing yet.
   `openssl-engine` and `openssl-engine-capi` are superseded: OpenSSL 4 removed
   the ENGINE API they were built on.
 
-[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/jose-pr/sslcontext/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/jose-pr/sslcontext/releases/tag/v2.0.0
