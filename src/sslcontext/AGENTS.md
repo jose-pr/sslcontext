@@ -554,9 +554,9 @@ key lives in memory; keystore-held CA keys are not supported.
 ## Command line (`sslcontext`, extra `cli`)
 
 ```
-sslcontext list  [SOURCE] [--all] [--json]
+sslcontext list  [SOURCE] [--all] [--format text|json] [--json]
 sslcontext show  [SOURCE] QUERY
-sslcontext probe [SOURCE] URL [--cafile F] [-k] [--ask] [--no-policy] [--timeout S] [--json]
+sslcontext probe [SOURCE] URL [--cafile F] [-k] [--ask] [--no-policy] [--timeout S] [--format text|json] [--json]
 SOURCE: [-b system|cng|pkcs11|<registered>] [--store MY] [--location current_user|local_machine]
         [--module PATH] [--token LABEL] [--pin none|ask|keystore]
 ```

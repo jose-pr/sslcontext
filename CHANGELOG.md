@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The command line ends through `duho.run`: Ctrl-C ends with status 130 and a closed
   standard output with status 1, both without a traceback. `--help`, `--version` and a
   usage error still raise `SystemExit`.
+- `sslcontext list` and `sslcontext probe` take `--format {text,json}` besides `--json`.
+  Their JSON is indented the same way; a non-ASCII character in it is now written as
+  itself, not as a `\uXXXX` escape. The help text of `--json` now reads "Same as
+  --format json".
 - The `cli` extra needs `duho>=0.7.8,<0.8` (was `>=0.7.4`).
 
 ## [2.1.0] - 2026-10-19

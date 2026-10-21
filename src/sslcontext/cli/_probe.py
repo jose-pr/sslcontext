@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import json
 import socket
 import ssl
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlsplit
 
-from duho import CommandError
+from duho import CommandError, OutputArgs
 
 from .. import CertificateRequest, Identity
 from .._select import ClientCertificateSelector
@@ -41,7 +40,7 @@ class _Recording(ClientCertificateSelector):
         return chosen
 
 
-class Probe(SourceCommand):
+class Probe(OutputArgs, SourceCommand):
     """Connect to a server with the system's context: show its certificate, whether it asked for a client certificate, which ones fit and which was sent, and (https) the HTTP status."""
 
     _parsername_ = "probe"
@@ -69,10 +68,6 @@ class Probe(SourceCommand):
     timeout: float = 15.0
     "Seconds to wait for the connection and each reply"
     ("--timeout",)
-
-    json_output: bool = False
-    "Print one JSON object instead of lines"
-    ("--json",)
 
     def target(self) -> tuple:
         text = self.url if "://" in self.url else f"tls://{self.url}"
@@ -110,10 +105,7 @@ class Probe(SourceCommand):
             result["error"] = f"{type(error).__name__}: {error}"
             status = 1
         result["certificate_requests"] = selector.requests
-        if self.json_output:
-            print(json.dumps(result, indent=2))
-        else:
-            _print(result)
+        self._output_(result, text=_text)
         return status
 
 
@@ -143,24 +135,25 @@ def _status(tls: ssl.SSLSocket, host: str, port: int, path: str) -> str:
     return reply.split(b"\r\n", 1)[0].decode("latin-1")
 
 
-def _print(result: Dict[str, Any]) -> None:
-    print(f"{result['host']}:{result['port']}")
+def _text(result: Dict[str, Any]) -> str:
+    lines = [f"{result['host']}:{result['port']}"]
     if "tls_version" in result:
-        print(f"  {result['tls_version']} {result['cipher']}")
+        lines.append(f"  {result['tls_version']} {result['cipher']}")
         server = result.get("server") or {}
         if server:
-            print(f"  server: {server['subject']}  (issuer {server['issuer']})")
+            lines.append(f"  server: {server['subject']}  (issuer {server['issuer']})")
     requests = result["certificate_requests"]
     if not requests:
-        print("  client certificate: not requested")
+        lines.append("  client certificate: not requested")
     for request in requests:
         names = ", ".join(request["authorities"]) or "any CA"
-        print(f"  client certificate requested; accepted issuers: {names}")
+        lines.append(f"  client certificate requested; accepted issuers: {names}")
         for candidate in request["candidates"]:
-            print(f"    fits: {candidate['subject']}  ({candidate['sha1']})")
+            lines.append(f"    fits: {candidate['subject']}  ({candidate['sha1']})")
         sent = request["sent"]
-        print(f"  sent: {sent['subject'] if sent else 'none'}")
+        lines.append(f"  sent: {sent['subject'] if sent else 'none'}")
     if "http" in result:
-        print(f"  http: {result['http']}")
+        lines.append(f"  http: {result['http']}")
     if "error" in result:
-        print(f"  error: {result['error']}")
+        lines.append(f"  error: {result['error']}")
+    return "\n".join(lines)

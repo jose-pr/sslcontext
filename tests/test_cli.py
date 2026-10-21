@@ -141,3 +141,35 @@ def test_ctrl_c_and_a_closed_pipe_end_quietly(monkeypatch, capsys, raised, statu
     monkeypatch.setattr(List, "__call__", fail)
     assert main(["list", "-b", "clitest"]) == status
     assert "Traceback" not in capsys.readouterr().err
+
+
+class _EmptyBackend(Backend):
+    name = "cliempty"
+
+    def identities(self):
+        return iter(())
+
+
+register_backend("cliempty", _EmptyBackend)
+
+
+def test_list_takes_format_json_as_json_does(capsys):
+    _, by_flag, _ = run(capsys, "list", "-b", "clitest", "--json")
+    status, by_format, _ = run(capsys, "list", "-b", "clitest", "--format", "json")
+    assert status == 0 and by_format == by_flag
+    assert by_format.startswith("[\n  {\n")
+
+
+def test_list_with_nothing_prints_no_line_and_json_prints_an_empty_array(capsys):
+    assert run(capsys, "list", "-b", "cliempty") == (0, "", "")
+    assert run(capsys, "list", "-b", "cliempty", "--json") == (0, "[]\n", "")
+
+
+def test_probe_takes_format_json(capsys):
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        port = unused.getsockname()[1]
+    status, out, _ = run(
+        capsys, "probe", f"127.0.0.1:{port}", "-b", "clitest", "--format", "json"
+    )
+    assert status == 1 and json.loads(out)["port"] == port

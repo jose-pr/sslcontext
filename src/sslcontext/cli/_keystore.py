@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from duho import CommandError
+from duho import CommandError, OutputArgs
 
 from .._select import ClientCertificateSelector
 from ._common import SourceCommand, describe
@@ -12,7 +12,7 @@ from ._common import SourceCommand, describe
 __all__ = ["List", "Show"]
 
 
-class List(SourceCommand):
+class List(OutputArgs, SourceCommand):
     """List the client certificates whose private key can be used, newest expiry first."""
 
     _parsername_ = "list"
@@ -21,26 +21,27 @@ class List(SourceCommand):
     "Include expired and not-yet-valid certificates"
     ("--all", "-a")
 
-    json_output: bool = False
-    "Print a JSON array instead of lines"
-    ("--json",)
-
     def __call__(self) -> int:
         selector = ClientCertificateSelector(self.sources())
         rows = [describe(identity, selector) for identity in selector.identities()]
         if not self.all:
             rows = [row for row in rows if row["valid"]]
         rows.sort(key=lambda row: row["not_after"], reverse=True)
-        if self.json_output:
-            print(json.dumps(rows, indent=2))
-            return 0
-        for row in rows:
-            usable = {True: "client", False: "no-client", None: "?"}[row["client_auth"]]
-            print(
-                f"{row['sha1']}  {row['not_after']}  {row['key']:<8} {usable:<9} "
-                f"{row['subject']}  (issuer {row['issuer']})"
-            )
+        # No identities is no line at all, as before; JSON still prints [].
+        if rows or self.json or self.format == "json":
+            self._output_(rows, text=_lines)
         return 0
+
+
+def _lines(rows: list) -> str:
+    lines = []
+    for row in rows:
+        usable = {True: "client", False: "no-client", None: "?"}[row["client_auth"]]
+        lines.append(
+            f"{row['sha1']}  {row['not_after']}  {row['key']:<8} {usable:<9} "
+            f"{row['subject']}  (issuer {row['issuer']})"
+        )
+    return "\n".join(lines)
 
 
 class Show(SourceCommand):
