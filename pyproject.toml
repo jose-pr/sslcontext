@@ -26,7 +26,7 @@ dependencies = ['truststore>=0.10,<0.11; python_version >= "3.10"']
 
 [project.optional-dependencies]
 # The sslcontext command; only sslcontext.cli imports duho.
-cli = ["duho>=0.7.4,<0.8"]
+cli = ["duho>=0.7.8,<0.8"]
 dev = ["black", "build", "pytest", "sslcontext[cli]"]
 docs = ["mkdocs", "mkdocs-material", "mkdocstrings[python]"]
 

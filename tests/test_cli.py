@@ -118,3 +118,26 @@ def test_without_the_extra_main_names_it(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "duho", None)
     assert main(["list"]) == 1
     assert "sslcontext[cli]" in capsys.readouterr().err
+
+
+def test_help_and_a_usage_error_raise_system_exit():
+    with pytest.raises(SystemExit) as caught:
+        main(["--help"])
+    assert caught.value.code == 0
+    with pytest.raises(SystemExit) as caught:
+        main(["show"])
+    assert caught.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "raised, status", [(KeyboardInterrupt, 130), (BrokenPipeError, 1)]
+)
+def test_ctrl_c_and_a_closed_pipe_end_quietly(monkeypatch, capsys, raised, status):
+    from sslcontext.cli._keystore import List
+
+    def fail(self):
+        raise raised
+
+    monkeypatch.setattr(List, "__call__", fail)
+    assert main(["list", "-b", "clitest"]) == status
+    assert "Traceback" not in capsys.readouterr().err

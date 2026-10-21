@@ -573,8 +573,9 @@ what was sent); a failed connection is reported and exits 1. `--ask` picks
 on the terminal when several fit; `--pin ask` reads a PIN with `getpass`
 (never for listing), `--pin keystore` uses `KEYSTORE_PROMPT`; the default
 never waits. `-b system` is `system_sources()`. Exit codes: 0 done, 1 failed
-(or the extra is missing), 2 wrong invocation (an unknown backend, a scheme
-other than `https`). `sslcontext.cli.main(argv=None) -> int` runs it in
+(or the extra is missing, or standard output was closed), 2 wrong invocation
+(an unknown backend, a scheme other than `https`), 130 Ctrl-C.
+`sslcontext.cli.main(argv=None) -> int` runs it in
 process; importing `sslcontext.cli` needs no duho.
 
 ## Test helpers (`sslcontext.testing`)
