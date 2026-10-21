@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-22
+
 ### Changed
 
 - The command line ends through `duho.run`: Ctrl-C ends with status 130 and a closed
@@ -101,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `openssl-engine` and `openssl-engine-capi` are superseded: OpenSSL 4 removed
   the ENGINE API they were built on.
 
-[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/jose-pr/sslcontext/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/jose-pr/sslcontext/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/jose-pr/sslcontext/releases/tag/v2.0.0
