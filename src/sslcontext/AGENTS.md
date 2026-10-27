@@ -301,8 +301,9 @@ class CertificateInfo:
 
 A signer may carry `supports_pss: bool`. When it is `False` on an RSA
 identity, `load_identity` restricts the context's own signatures to PKCS#1
-v1.5 RSA and ECDSA (`SSL_CTX_set1_client_sigalgs_list`), so that identity
-can only complete TLS 1.2.
+v1.5 RSA and ECDSA (`SSL_CTX_set1_client_sigalgs_list`) and lowers the
+context's `maximum_version` to TLS 1.2, since TLS 1.3 needs PSS. A context
+whose `minimum_version` is already TLS 1.3 keeps it, and its handshakes fail.
 
 ```python
 def load_identity(context: ssl.SSLContext, identity: Identity) -> None

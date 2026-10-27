@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `load_identity` with a key only a legacy CryptoAPI CSP can use (no RSA-PSS)
+  lowers the context's maximum version to TLS 1.2. Against a TLS 1.3 server the
+  client used to send no certificate at all, and the server refused the
+  connection ("certificate required").
+
 ## [2.1.1] - 2026-10-22
 
 ### Changed

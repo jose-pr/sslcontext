@@ -9,6 +9,7 @@ from typing import Any, Optional, Sequence, Union
 from ._identity import Identity
 from ._openssl import OpenSSL, openssl, ssl_ctx_pointer
 from ._openssl import _keys
+from ._openssl._ctx import handshake_context
 from ._openssl._errors import drain_errors
 from ._openssl._objects import read_certificates, read_pkcs12, read_private_key
 from ._openssl._signing import make_private_key
@@ -229,8 +230,9 @@ def load_identity(context: ssl.SSLContext, identity: Identity) -> None:
 def _sign_without_pss(lib: OpenSSL, context: ssl.SSLContext) -> None:
     """Keep the context's own signatures to PKCS#1 v1.5 RSA and ECDSA.
 
-    TLS 1.3 needs RSA-PSS, so an RSA identity restricted this way is limited
-    to TLS 1.2 peers.
+    TLS 1.3 needs RSA-PSS, so the context's maximum version is also lowered
+    to TLS 1.2 unless its minimum already excludes 1.2: negotiating 1.3
+    would leave the identity unusable and the certificate silently unsent.
     """
     pointer = ssl_ctx_pointer(lib, context)
     if not lib.SSL_CTX_ctrl(
@@ -239,3 +241,8 @@ def _sign_without_pss(lib: OpenSSL, context: ssl.SSLContext) -> None:
         raise CredentialError(
             f"cannot restrict signature algorithms: {drain_errors(lib)}"
         )
+    # MINIMUM_SUPPORTED and MAXIMUM_SUPPORTED are negative.
+    inner = handshake_context(context)
+    tls12 = ssl.TLSVersion.TLSv1_2
+    if inner.minimum_version <= tls12 and not 0 <= inner.maximum_version <= tls12:
+        inner.maximum_version = tls12

@@ -156,6 +156,15 @@ def test_cryptoapi_keys_sign_pkcs1_for_tls12(legacy_certificate):
         assert server.handshake(context) == (legacy_certificate.subject, "TLSv1.2")
 
 
+def test_cryptoapi_keys_cap_a_default_context_at_tls12(legacy_certificate):
+    identity = CNGBackend().find_identity(thumbprint=legacy_certificate.thumbprint)
+    context = client_context()
+    sslcontext.load_identity(context, identity)
+    assert context.maximum_version == ssl.TLSVersion.TLSv1_2
+    with TLSServer(trust=legacy_certificate.der) as server:
+        assert server.handshake(context) == (legacy_certificate.subject, "TLSv1.2")
+
+
 def test_cryptoapi_keys_cannot_complete_tls13(legacy_certificate):
     identity = CNGBackend().find_identity(thumbprint=legacy_certificate.thumbprint)
     context = client_context()
