@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-10-28
+
 ### Fixed
 
 - `load_identity` with a key only a legacy CryptoAPI CSP can use (no RSA-PSS)
@@ -110,7 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `openssl-engine` and `openssl-engine-capi` are superseded: OpenSSL 4 removed
   the ENGINE API they were built on.
 
-[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/jose-pr/sslcontext/compare/v2.1.2...HEAD
+[2.1.2]: https://github.com/jose-pr/sslcontext/compare/v2.1.1...v2.1.2
 [2.1.1]: https://github.com/jose-pr/sslcontext/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/jose-pr/sslcontext/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/jose-pr/sslcontext/releases/tag/v2.0.0
