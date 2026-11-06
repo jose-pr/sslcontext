@@ -109,6 +109,11 @@ class TLSServer:
                     if not chunk:
                         break
                     reply += chunk
+        if not reply:
+            # TLS 1.3: the client finishes its handshake before the server
+            # checks the client certificate, so a refusal can arrive as a
+            # plain EOF instead of an alert.
+            raise ConnectionResetError("the server closed without answering")
         cn, version = reply.decode().split("\n")
         return Handshake(cn, version)
 
